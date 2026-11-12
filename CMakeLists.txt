@@ -202,7 +202,19 @@ endif()
 option(VW_WITH_LUA "Build the deprecated Lua frontend (the vw executable)" ON)
 if(VW_WITH_LUA)
   find_package(Lua 5.4 REQUIRED)
+  set(VW_TEMPLATE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/templates/default")
+  set(VW_TEMPLATE_HEADER "${CMAKE_CURRENT_BINARY_DIR}/vw_project_template.hpp")
+  add_custom_command(
+    OUTPUT "${VW_TEMPLATE_HEADER}"
+    COMMAND "${CMAKE_COMMAND}" "-DOUTPUT=${VW_TEMPLATE_HEADER}" "-DTEMPLATE_DIR=${VW_TEMPLATE_DIR}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedTemplates.cmake"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedTemplates.cmake"
+            "${VW_TEMPLATE_DIR}/CMakeLists.txt" "${VW_TEMPLATE_DIR}/main.cpp"
+            "${VW_TEMPLATE_DIR}/.gitignore" "${VW_TEMPLATE_DIR}/flake.nix"
+    VERBATIM)
   add_executable(vw
+    "${VW_TEMPLATE_HEADER}"
+    src/init.cpp
     src/main.cpp
     src/lua/animation.cpp
     src/lua/applications.cpp
@@ -214,11 +226,13 @@ if(VW_WITH_LUA)
     src/lua/pipewire.cpp
     src/lua/socket.cpp
     src/lua/zwwm.cpp)
-  target_include_directories(vw PRIVATE ${LUA_INCLUDE_DIR})
+  target_include_directories(vw PRIVATE ${LUA_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
   target_link_libraries(vw PRIVATE vw::vw ${LUA_LIBRARIES})
   target_compile_definitions(vw PRIVATE VW_VERSION="${PROJECT_VERSION}")
   target_compile_options(vw PRIVATE -Wall -Wextra -Wpedantic)
 
+  # Finds libvw beside it wherever the prefix is, e.g. ~/.local.
+  set_target_properties(vw PROPERTIES INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
   install(TARGETS vw RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
   install(FILES
     examples/init.lua examples/toplevel.lua examples/slider.lua examples/material-slider.lua

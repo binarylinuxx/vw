@@ -15,9 +15,21 @@ cmake --build build
 
 `nix build` produces `libvw`, its headers, shaders and the `vw` Lua frontend; `nix run` starts the frontend.
 
+## Start a project
+
+The `vw` command writes a new project, named after its directory, and builds it:
+
+```sh
+vw --init my-widget             # CMakeLists.txt, main.cpp, .gitignore; cmake configure + build
+vw --init-nix my-widget         # the same with flake.nix: git add, nix flake lock, build in its dev shell
+./my-widget/build/my-widget
+```
+
+`--init` builds with clang and Ninja when they are installed and points CMake at the vw it came with. Neither overwrites an existing file.
+
 ## In a Nix flake project
 
-Start a project from the template, which has a flake, a `CMakeLists.txt` and a first surface:
+Without `vw` installed, start from the flake template instead; it has the same files:
 
 ```sh
 mkdir my-widget && cd my-widget

@@ -21,7 +21,7 @@
         filter = path: type:
           let name = baseNameOf path;
           in name != "build" && name != "result" && name != "node_modules" && name != "dist" &&
-             name != ".astro" && name != "vw-docs" && name != "templates" &&
+             name != ".astro" && name != "vw-docs" &&
              !(nixpkgs.lib.hasSuffix ".ppm" name);
       };
     in {

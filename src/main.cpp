@@ -1,6 +1,7 @@
 // The deprecated Lua frontend. New programs link libvw and use vw::App.
 #include "vw/app.hpp"
 #include "vw/lua_config.hpp"
+#include "init.hpp"
 
 #include <cstdlib>
 #include <filesystem>
@@ -17,7 +18,11 @@ namespace {
 
 constexpr std::string_view usage =
     "usage: vw [-c CONFIG] [--check] [--version] [--help]\n"
+    "       vw --init [DIR] | --init-nix [DIR]\n"
     "\n"
+    "      --init [DIR]     start a C++ project in DIR (default: .): writes\n"
+    "                       CMakeLists.txt, main.cpp and .gitignore, then builds it\n"
+    "      --init-nix [DIR] the same with a flake.nix, locked and built in its dev shell\n"
     "  -c, --config CONFIG  Lua configuration (default: $XDG_CONFIG_HOME/vw/init.lua)\n"
     "      --check          load the configuration, report the scene, and exit\n"
     "  -V, --version        print the version and exit\n"
@@ -52,6 +57,13 @@ Options parse_options(int argc, char** argv) {
       options.config = argv[++index];
     } else if (argument.starts_with("--config=")) {
       options.config = argument.substr(std::string_view("--config=").size());
+    } else if (argument == "--init" || argument == "--init-nix") {
+      // A directory may follow; anything else after --init is an error.
+      std::filesystem::path directory = ".";
+      if (index + 1 < argc && argv[index + 1][0] != '-') directory = argv[++index];
+      if (index + 1 < argc) throw std::runtime_error(std::string(argument) + " takes only a directory");
+      std::exit(vw::cli::init_project(directory, argument == "--init" ? vw::cli::InitKind::cmake
+                                                                       : vw::cli::InitKind::nix));
     } else if (argument == "--check") {
       options.check = true;
     } else if (argument == "-V" || argument == "--version") {
