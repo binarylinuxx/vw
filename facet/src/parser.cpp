@@ -33,10 +33,19 @@ class Parser {
     return result;
   }
 
-  // include "header.hpp" and file-level cpp { … }, before or between views.
+  // include "header.hpp", file-level cpp { … } and let name = value, before
+  // or between views.
   void top_level(File& result) {
     for (;;) {
-      if (at(Token::include)) {
+      if (at(Token::let) && ahead(1).kind == Token::identifier) {
+        Constant constant;
+        constant.at = current().at;
+        ++position_;
+        constant.name = expect(Token::identifier, "after 'let'").text;
+        expect(Token::assign, "after the name");
+        constant.value = expression();
+        result.constants.push_back(std::move(constant));
+      } else if (at(Token::include)) {
         ++position_;
         const Lexeme& header = expect(Token::string, "naming a header after 'include'");
         result.includes.push_back({header.text, header.at});

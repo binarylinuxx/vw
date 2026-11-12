@@ -207,6 +207,16 @@ class Generator {
     out_ << "\n";
     if (!namespace_.empty()) out_ << "namespace " << namespace_ << " {\n\n";
     for (const auto& code : file_.prelude) verbatim(code.at, code.text);
+    {
+      Scope scope(*this);
+      for (const auto& constant : file_.constants) {
+        if (local(constant.name)) throw Error(constant.at, "'" + constant.name + "' is already defined");
+        line(constant.at, std::format("inline const auto {} = {};", constant.name, expression(*constant.value)));
+        declare(constant.name);
+        constants_.insert(constant.name);
+      }
+    }
+    if (!file_.constants.empty()) out_ << "\n";
     for (const auto& view : file_.views) generate(view);
     if (!namespace_.empty()) out_ << "}  // namespace " << namespace_ << "\n";
     return out_.str();
@@ -266,7 +276,29 @@ class Generator {
     return false;
   }
   bool local(const std::string& name) const {
-    return std::ranges::any_of(scopes_, [&](const auto& scope) { return scope.contains(name); });
+    return constants_.contains(name) ||
+           std::ranges::any_of(scopes_, [&](const auto& scope) { return scope.contains(name); });
+  }
+
+  // id: name, with a bare name not already in use, names the element: its
+  // props are `name` to its children and to the elements after it. A string
+  // (or a variable) is a control's state key, as before.
+  const Argument* element_id(const Node& node) const {
+    const Argument* id = argument(node, "id");
+    if (id == nullptr || id->value->kind != Expr::Kind::identifier) return nullptr;
+    // Another element's name is still a name (a repeat is reported), not a key.
+    if (local(id->value->text) && !element_names_.contains(id->value->text)) return nullptr;
+    return id;
+  }
+
+  // Binds the element's props to its id, if it has one.
+  void name_element(const Node& node, const std::string& props) {
+    const Argument* id = element_id(node);
+    if (id == nullptr) return;
+    const std::string& name = id->value->text;
+    line(id->at, std::format("[[maybe_unused]] const auto& {} = {};", name, props));
+    declare(name);
+    element_names_.insert(name);
   }
 
   // The key of state belonging to the element at `at`, in its loops.
@@ -379,6 +411,13 @@ class Generator {
           flex->push_back(std::move(slot));
           return;
         }
+        if (const Argument* id = element_id(node)) {
+          // No braces: the elements after this one may use its name.
+          if (scopes_.back().contains(id->value->text))
+            throw Error(id->at, "id '" + id->value->text + "' is already used here");
+          line(node.at, std::format("{}.push_back({});", list, element(node)));
+          return;
+        }
         line(node.at, "{");
         ++indent_;
         line(node.at, std::format("{}.push_back({});", list, element(node)));
@@ -470,6 +509,7 @@ class Generator {
       std::string name = item.name;
       if (layout && (name == "bg" || name == "color" || name == "border_width" || name == "border_color")) continue;
       if (name == "flex" || name == "animate") continue;
+      if (name == "id" && &item == element_id(node)) continue;
       if (name.empty()) {
         if (index != 0 || spec.positional.empty())
           throw Error(item.at, std::string(spec.name) + " takes only named arguments here");
@@ -500,8 +540,10 @@ class Generator {
         throw Error(node.at, std::format("flex sets {}, which {} does not have", main->first, spec.name));
       line(node.at, std::format("{}.{} = {};", props, main->first, main->second));
     }
-    if ((spec.kind == Kind::control || spec.kind == Kind::listview) && argument(node, "id") == nullptr)
+    if ((spec.kind == Kind::control || spec.kind == Kind::listview) &&
+        (argument(node, "id") == nullptr || element_id(node) != nullptr))
       line(node.at, std::format("{}.id = {};", props, key(node.at)));
+    name_element(node, props);
 
     const std::string widget = fresh("widget");
     switch (spec.kind) {
@@ -639,6 +681,8 @@ class Generator {
       } else if (item.name == "props") {
         if (item.value->kind != Expr::Kind::object) throw Error(item.at, "props is an object: { … }");
         for (const auto& [name, value] : item.value->fields) fields.emplace_back(name, value.get());
+      } else if (item.name == "id" && &item == element_id(node)) {
+        continue;
       } else if (item.name.empty()) {
         throw Error(item.at, "Native takes only named arguments");
       } else {
@@ -661,6 +705,7 @@ class Generator {
     for (std::size_t index = 0; index < node.arguments.size(); ++index) {
       const Argument& item = node.arguments[index];
       if (item.name == "flex" && main) continue;  // a vw Row or Column sized it
+      if (item.name == "id" && &item == element_id(node)) continue;
       if (item.name.empty() && index != 0) throw Error(item.at, "only the first argument may be unnamed");
       fields.emplace_back(item.name.empty() ? "value" : item.name, item.value.get());
     }
@@ -675,6 +720,7 @@ class Generator {
     line(node.at, std::format("{}Props {}{{}};", function, props));
     for (const auto& [name, value] : fields) component_field(props + "." + name, name, *value);
     if (main) line(node.at, std::format("{}.{} = {};", props, main->first, main->second));
+    name_element(node, props);
     if (node.children.empty()) {
       line(node.at, std::format("const vw::Widget {} = {}(ui, {});", widget, function, props));
     } else {
@@ -963,6 +1009,8 @@ class Generator {
   std::map<std::string, std::string> modules_;
   std::vector<std::string> parameters_;
   std::vector<std::set<std::string>> scopes_;
+  std::set<std::string> constants_;      // file-level let
+  std::set<std::string> element_names_;  // every id: name so far
   std::vector<std::string> keys_;
   std::vector<Box> boxes_;
   std::ostringstream out_;

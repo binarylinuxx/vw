@@ -116,10 +116,18 @@ struct Code {
   Location at;  // where the text starts
 };
 
+// let name = value at file level: a constant every view can use.
+struct Constant {
+  std::string name;
+  ExprPtr value;
+  Location at;
+};
+
 struct File {
   std::vector<Code> includes;  // include "x.hpp": the header names
   std::vector<Import> imports;
   std::vector<Code> prelude;   // file-level cpp { … }, before every view
+  std::vector<Constant> constants;
   std::vector<View> views;
 };
 
