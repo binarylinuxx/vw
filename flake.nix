@@ -53,10 +53,15 @@
       #
       # Every other attribute (version, cmakeFlags, meta, postInstall, ...) goes
       # to mkDerivation.
-      lib.mkShell = { system, pname, src, version ? "0.1.0", shellDeps ? [ ], nativeShellDeps ? [ ], ... }@args:
+      #
+      # facet = <Facet's package> adds Facet to the build: facetc, its runtime
+      # and find_package(facet) with facet_compile(). Facet is a separate,
+      # optional project; vw never depends on it. Its flake's lib.mkShell
+      # fills this in.
+      lib.mkShell = { system, pname, src, version ? "0.1.0", shellDeps ? [ ], nativeShellDeps ? [ ], facet ? null, ... }@args:
         let
           pkgs = pkgsFor system;
-          rest = removeAttrs args [ "system" "shellDeps" "nativeShellDeps" ];
+          rest = removeAttrs args [ "system" "shellDeps" "nativeShellDeps" "facet" ];
           package = pkgs.clangStdenv.mkDerivation (rest // {
             inherit pname version;
             # A local build tree's CMakeCache.txt would take over the build.
@@ -66,7 +71,8 @@
             } else src;
             nativeBuildInputs = [ pkgs.cmake pkgs.ninja pkgs.shaderc ] ++ nativeShellDeps
               ++ (args.nativeBuildInputs or [ ]);
-            buildInputs = [ pkgs.vw-static ] ++ shellDeps ++ (args.buildInputs or [ ]);
+            buildInputs = [ pkgs.vw-static ] ++ nixpkgs.lib.optional (facet != null) facet ++ shellDeps
+              ++ (args.buildInputs or [ ]);
             meta = { mainProgram = pname; platforms = nixpkgs.lib.platforms.linux; } // (args.meta or { });
             passthru = (args.passthru or { }) // {
               # Everything the package builds with, for working on it by hand.

@@ -64,6 +64,8 @@ To package a shell from a flake you already have, hand it to `vw.lib.mkShell`. I
 
 Every other attribute (`version`, `cmakeFlags`, `postInstall`, `meta`, …) goes straight to `mkDerivation`. `.devShell` is a clang shell with everything the package builds with, for `cmake` by hand.
 
+Facet, the declarative view language that compiles to vw, is a separate and optional project. Pass its package as `facet = …;` (or use its flake's own `lib.mkShell`, which does that) to get `facetc` and `facet_compile()` in the build; without it nothing of Facet is involved.
+
 For full control, take the overlay instead: it adds `pkgs.vw` and `pkgs.vw-static` next to the rest of nixpkgs, and `find_package(vw)` works as below.
 
 ```nix
