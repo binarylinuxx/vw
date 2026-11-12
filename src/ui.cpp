@@ -905,6 +905,7 @@ void Ui::surface(const SurfaceProps& props) {
   scene_.exclusive_zone = props.exclusive_zone;
   scene_.margin = props.margin;
   scene_.surface_namespace = props.surface_namespace;
+  scene_.output = props.output;
   if (!std::isfinite(props.refresh_interval) || props.refresh_interval < 0.008 ||
       props.refresh_interval > 3600)
     throw std::invalid_argument("refresh_interval must be between 0.008 and 3600 seconds");

@@ -21,6 +21,7 @@ A build that draws nothing leaves the surface unmapped.
 | `margin` | 0 | `{top, right, bottom, left}` |
 | `exclusive_zone` | 0 | pixels reserved from the anchored edge; `-1` ignores others' zones |
 | `surface_namespace` | `"vw"` | for compositor layer rules |
+| `output` | compositor's choice | the monitor to show on, by name (`"DP-1"`); a different name later moves the surface there. [`App::per_output`](/reference/app/#vwapp) fills it in |
 | `input_regions` | everything | `{x, y, w, h}` rectangles that take input; empty is click-through |
 | `focus_grab`, `on_activated`, `on_dismiss` | off | zwwm focus grab for popups |
 | `on_closed` | — | the compositor closed the surface |

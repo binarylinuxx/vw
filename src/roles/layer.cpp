@@ -10,7 +10,11 @@
 
 #include <algorithm>
 #include <array>
+#include <memory>
 #include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace vw::roles {
 namespace {
@@ -75,6 +79,8 @@ class LayerRole final : public Role {
     } else if (interface == generated::zwlr_layer_shell_v1_interface.name) {
       wlr_name_ = name;
       wlr_version_ = version;
+    } else if (interface == generated::wl_output_interface.name) {
+      output_globals_.emplace_back(name, version);
     }
   }
 
@@ -92,6 +98,7 @@ class LayerRole final : public Role {
       throw std::runtime_error("compositor requires wl_compositor, linux-dmabuf, and a layer-shell protocol");
     }
     if (shell_ == nullptr) throw std::runtime_error("could not bind required Wayland globals");
+    find_output();
   }
 
   bool focus_grab() const override { return true; }
@@ -101,9 +108,9 @@ class LayerRole final : public Role {
     const Scene& scene = this->scene();
     const std::uint32_t id = native_
         ? generated::zwwm_layer_shell_v1_get_layer_surface(
-              display(), shell_->id, surface(), nullptr, scene.layer, scene.surface_namespace)
+              display(), shell_->id, surface(), output_, scene.layer, scene.surface_namespace)
         : generated::zwlr_layer_shell_v1_get_layer_surface(
-              display(), shell_->id, surface(), nullptr, scene.layer, scene.surface_namespace);
+              display(), shell_->id, surface(), output_, scene.layer, scene.surface_namespace);
     layer_surface_ = display().find_proxy(id);
     if (layer_surface_ == nullptr) throw std::runtime_error("could not create layer surface");
     start_focus_grab();
@@ -133,6 +140,51 @@ class LayerRole final : public Role {
   }
 
  private:
+  // SurfaceProps::output names a monitor: bind the outputs and keep the one
+  // with that name (wl_output 4 reports names). Not found, the compositor
+  // picks, as with no name.
+  void find_output() {
+    const std::string& wanted = scene().output;
+    if (wanted.empty()) return;
+    struct Named {
+      client::Proxy* proxy = nullptr;
+      std::string name;
+    };
+    std::vector<std::unique_ptr<Named>> outputs;
+    for (const auto& [name, version] : output_globals_) {
+      if (version < 4) continue;
+      auto entry = std::make_unique<Named>();
+      entry->proxy = client::core::bind(display(), registry(), name, generated::wl_output_interface,
+                                        std::min(version, generated::wl_output_interface.version));
+      if (entry->proxy == nullptr) continue;
+      struct Events {
+        Named* entry;
+        void geometry(client::Proxy&, std::int32_t, std::int32_t, std::int32_t, std::int32_t, std::int32_t,
+                      const std::string&, const std::string&, std::int32_t) {}
+        void mode(client::Proxy&, std::uint32_t, std::int32_t, std::int32_t, std::int32_t) {}
+        void done(client::Proxy&) {}
+        void scale(client::Proxy&, std::int32_t) {}
+        void name(client::Proxy&, const std::string& value) { entry->name = value; }
+        void description(client::Proxy&, const std::string&) {}
+      };
+      entry->proxy->set_observer(generated::wl_output_observer(Events{entry.get()}));
+      outputs.push_back(std::move(entry));
+    }
+    if (outputs.empty()) return;
+    if (!display().roundtrip()) throw std::runtime_error("Wayland output roundtrip failed");
+    const auto ignore = [](client::Proxy&, std::uint32_t, zwayland::wire::MessageParser&) {};
+    for (const auto& entry : outputs) {
+      if (entry->name == wanted && output_ == nullptr) {
+        output_ = entry->proxy;
+        output_->set_observer(ignore);
+      } else {
+        // Only the chosen one is kept.
+        entry->proxy->set_observer(ignore);
+        generated::wl_output_release(display(), entry->proxy->id);
+      }
+    }
+  }
+
   template <auto Native, auto Wlr, typename... Arguments>
   void send(Arguments... arguments) {
     if (native_) Native(display(), layer_surface_->id, arguments...);
@@ -206,6 +258,8 @@ class LayerRole final : public Role {
   bool native_ = false;
   client::Proxy* shell_ = nullptr;
   client::Proxy* layer_surface_ = nullptr;
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> output_globals_;  // wl_output: name, version
+  client::Proxy* output_ = nullptr;
   Placement sent_;
   bool layer_surface_created_ = false;
 };

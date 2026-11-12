@@ -907,7 +907,8 @@ void WaylandWidget::refresh_scene(bool input) {
     if (role_->refresh()) return;
     set_surface_size({configured_width_, configured_height_});
     Scene next = source_->build();
-    if (!next.mapped || roles::kind(next) != roles::kind(scene_)) {
+    // A layer surface stays on its output; another output is a new surface.
+    if (!next.mapped || roles::kind(next) != roles::kind(scene_) || next.output != scene_.output) {
       retired_ = true;
       return;
     }

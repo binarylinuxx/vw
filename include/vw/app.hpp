@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "vw/outputs.hpp"
 #include "vw/scene.hpp"
 #include "vw/ui.hpp"
 
@@ -52,6 +53,7 @@ void run(SceneSource& source);
 class App : public SceneSource {
  public:
   using BuildFunction = std::function<void(Ui&)>;
+  using OutputBuildFunction = std::function<void(Ui&, const Output&)>;
 
   App();
   // A single-surface app.
@@ -59,6 +61,19 @@ class App : public SceneSource {
   ~App() override;
 
   App& surface(BuildFunction build);
+
+  // One surface per monitor, each built for its output and shown on it, so
+  // a bar knows its monitor's size from the first frame:
+  //
+  //   app.per_output([](vw::Ui& ui, const vw::Output& output) {
+  //     … lay out for output.width …
+  //     ui.surface({.width = 0, .height = 32, .anchor = vw::anchor::top});
+  //   });
+  //
+  // Monitors plugged in later get their own; a removed one's surface goes.
+  // SurfaceProps::output defaults to the output being built. Up to `most`
+  // monitors at once.
+  App& per_output(OutputBuildFunction build, std::size_t most = 8);
 
   // Rebuild whenever fd becomes readable and drain() returns true. A
   // negative fd (an unavailable service) is ignored.
@@ -74,8 +89,11 @@ class App : public SceneSource {
 
  private:
   class Surface;
+  class Outputs;
   std::vector<std::unique_ptr<Surface>> surfaces_;
+  std::vector<std::shared_ptr<Outputs>> output_groups_;
   std::vector<EventSource> events_;
+  bool watching_outputs_ = false;
 };
 
 }  // namespace vw

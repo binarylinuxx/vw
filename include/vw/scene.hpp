@@ -280,6 +280,8 @@ struct Scene {
   std::int32_t exclusive_zone = 0;
   bool accepts_input = true;
   std::string surface_namespace = "vw";
+  // Layer surfaces: the output's name, or empty for the compositor's choice.
+  std::string output;
   bool toplevel = false;
   bool surface_configured = false;
   // The compositor picks this dimension (layer-shell size 0).

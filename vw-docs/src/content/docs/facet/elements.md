@@ -9,7 +9,7 @@ Colors take `"#rrggbb"`, `"#rrggbbaa"`, `"transparent"` or a C++ `vw::Color`; si
 
 | Element | Properties |
 | --- | --- |
-| `Surface` | `width`, `height`, `anchor` (`center`, `top`, `bottom`, `left`, `right`, `top_left`, … `fill`), `layer` (`background`, `bottom`, `top`, `overlay`), `exclusive_zone`, `namespace`, `refresh` |
+| `Surface` | `width`, `height`, `anchor` (`center`, `top`, `bottom`, `left`, `right`, `top_left`, … `fill`), `layer` (`background`, `bottom`, `top`, `overlay`), `exclusive_zone`, `namespace`, `refresh`, `output` (a monitor's name) |
 | `Rectangle` | `width`, `height`, `radius`, `color`/`bg`, `color2` and `gradient` (`horizontal`, `vertical`), `border_width`, `border_color`, `input`; children sit centred on it |
 | `Text` | `text` (or first), `font`, `size`, `weight` (`thin` … `black`), `color`, `max_width`, `max_lines`, `align`, `padding`, `input` |
 | `Image` | `path` (or first), `icon`, `width`, `height`, `fit` (`stretch`, `contain`, `cover`), `radius`, `padding`, `input`; an empty path keeps its size |

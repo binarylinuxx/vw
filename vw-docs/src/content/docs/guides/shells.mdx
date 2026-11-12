@@ -55,6 +55,25 @@ The handler sees every key first and returns `true` when it handled one; anythin
 
 With zwwm, `focus_grab = true` asks the compositor to tell you when the user clicks elsewhere. `on_dismiss` receives a `FocusEvent` whose `reason()` is `outside`, `unmapped`, `replaced`, `locked` or `released`; close your popup there. More in [Focus grabs and decorations](/compositor/zwwm-surfaces/).
 
+## One bar per monitor
+
+`app.per_output(build)` makes a surface for every monitor and hands the build that monitor, so a bar knows its width on the very first frame instead of waiting for the compositor's configure:
+
+```cpp
+app.per_output([&](vw::Ui& ui, const vw::Output& output) {
+  // a narrow laptop panel gets the compact bar
+  const bool compact = output.width < 1600;
+  const vw::Widget clock = ui.text({.text = clock_text(), .size = compact ? 13.0F : 15.0F});
+  ui.align(clock, vw::anchor::center);
+  if (!compact) build_workspaces(ui, output.name);
+  ui.surface({.width = 0, .height = 32, .anchor = vw::anchor::top, .exclusive_zone = 32});
+});
+```
+
+Each surface goes on its own monitor (`SurfaceProps::output` is filled in for you). A monitor plugged in later gets a bar, an unplugged one's bar goes, and a mode or scale change rebuilds them. The rest stay as they are.
+
+For one surface on a chosen monitor, set `output` yourself: `ui.surface({…, .output = "HDMI-A-1"})`. `vw::outputs()` lists the names and sizes. In Facet it is `Surface(output: "HDMI-A-1", …)`, and a view can take the monitor as a parameter: `views::Bar(ui, state, output)`.
+
 ## Coming and going
 
 A build that draws nothing leaves its surface unmapped until a later build draws again. Gate a launcher on your own `bool open`; the surface appears and disappears with it. Several `app.surface(...)` calls give you several surfaces in one loop.

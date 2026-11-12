@@ -364,6 +364,9 @@ struct SurfaceProps {
   // grow (e.g. to show a panel) while reserving only its bar.
   std::int32_t exclusive_zone = 0;
   std::string surface_namespace = "vw";
+  // The output (monitor) to show on, by name: "DP-1". Empty lets the
+  // compositor pick. See vw::outputs() and App::per_output.
+  std::string output;
   // {x, y, width, height}. Present but empty makes the surface click-through.
   std::optional<std::vector<std::array<std::int32_t, 4>>> input_regions;
   bool focus_grab = false;
