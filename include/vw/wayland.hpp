@@ -20,6 +20,7 @@ struct Proxy;
 namespace vw {
 
 class SceneSource;
+namespace roles { class Role; }
 
 // Drives every surface on one event loop until a surface without a close
 // handler closes, SIGINT/SIGTERM arrives, or a toplevel requests close.
@@ -65,21 +66,15 @@ class WaylandWidget {
   void copy_to_clipboard(std::string text);
   std::optional<std::string> paste_from_clipboard();
 
-  void configured(std::uint32_t serial, std::uint32_t width, std::uint32_t height);
-  void toplevel_configured(std::int32_t width, std::int32_t height);
-  void xdg_configured(std::uint32_t serial);
-  void closed();
   void pointer_motion(double x, double y);
   void pointer_leave();
   void pointer_button(std::uint32_t button, std::uint32_t state);
   void pointer_axis(double vertical);
-  void add_lock_output(std::uint32_t name, std::uint32_t version);
-  void remove_lock_output(std::uint32_t name);
-  void lock_configured(std::uint32_t name, std::uint32_t serial,
-                       std::uint32_t width, std::uint32_t height);
-  void activate_lock_surface(std::uint32_t surface_id);
 
  private:
+  // Roles (src/roles) present the surface; Role's helpers reach in here.
+  friend class roles::Role;
+
   void discover_globals();
   void create_pointer();
   void create_keyboard();
@@ -96,11 +91,6 @@ class WaylandWidget {
   void text_pointer_press(std::size_t interaction_index);
   void create_buffer(const Frame& frame);
   void create_buffer_for(const Frame& frame, zwayland::client::Proxy*& target);
-  void create_surface(const Scene& scene);
-  void create_lock_surface(std::uint32_t name);
-  void render_lock_output(std::uint32_t name);
-  void present_lock_output(std::uint32_t name, const Scene& scene, const Frame& frame);
-  void unlock_session();
   void configure_surface_input(const Scene& scene);
   void reload(const Scene& scene, const Frame& frame);
   bool animate_hover(float elapsed_seconds);
@@ -118,34 +108,21 @@ class WaylandWidget {
   std::unique_ptr<zwayland::client::Display> display_;
   zwayland::client::Proxy* compositor_ = nullptr;
   zwayland::client::Proxy* dmabuf_ = nullptr;
-  zwayland::client::Proxy* layer_shell_ = nullptr;
   zwayland::client::Proxy* focus_grab_manager_ = nullptr;
   zwayland::client::Proxy* focus_grab_ = nullptr;
   bool focus_grab_requested_ = false;
   struct PendingFocus { bool activated; std::uint32_t reason; };
   std::vector<PendingFocus> focus_events_;
-  zwayland::client::Proxy* xdg_wm_base_ = nullptr;
-  zwayland::client::Proxy* xdg_surface_ = nullptr;
-  zwayland::client::Proxy* xdg_toplevel_ = nullptr;
   zwayland::client::Proxy* registry_ = nullptr;
-  zwayland::client::Proxy* lock_manager_ = nullptr;
-  zwayland::client::Proxy* session_lock_ = nullptr;
   zwayland::client::Proxy* surface_ = nullptr;
-  zwayland::client::Proxy* layer_surface_ = nullptr;
-  bool native_layer_shell_ = false;
   zwayland::client::Proxy* buffer_ = nullptr;
   zwayland::client::Proxy* seat_ = nullptr;
   zwayland::client::Proxy* pointer_ = nullptr;
   zwayland::client::Proxy* keyboard_ = nullptr;
   struct KeyboardState;
   std::unique_ptr<KeyboardState> keyboard_state_;
-  struct LockOutput;
-  std::vector<std::unique_ptr<LockOutput>> lock_outputs_;
-  std::uint32_t active_lock_output_ = 0;
-  std::uint32_t keyboard_lock_surface_ = 0;
-  bool session_locked_ = false;
-  bool lock_surfaces_started_ = false;
   Scene scene_;
+  std::unique_ptr<roles::Role> role_;
   Renderer* renderer_ = nullptr;
   int hovered_ = -1;
   int pressed_ = -1;
@@ -155,8 +132,6 @@ class WaylandWidget {
   std::uint32_t height_ = 0;
   std::uint32_t configured_width_ = 0;
   std::uint32_t configured_height_ = 0;
-  std::uint32_t pending_width_ = 0;
-  std::uint32_t pending_height_ = 0;
   bool configured_ = false;
   bool closed_ = false;
   bool pointer_inside_ = false;

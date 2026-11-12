@@ -120,6 +120,10 @@ add_library(vw_core SHARED
   src/ui.cpp
   src/upower.cpp
   src/vws.cpp
+  src/roles/layer.cpp
+  src/roles/lock.cpp
+  src/roles/role.cpp
+  src/roles/toplevel.cpp
   src/wayland.cpp
   src/zwwm.cpp)
 add_library(vw::vw ALIAS vw_core)

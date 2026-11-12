@@ -3,14 +3,11 @@
 #include "vw/app.hpp"
 #include "vw/host.hpp"
 #include "vw/ipc.hpp"
+#include "roles/role.hpp"
 
 #include <wlr-data-control-unstable-v1-zwayland-client.h>
-#include <wlr-layer-shell-unstable-v1-zwayland-client.h>
-#include <zwwm-layer-shell-v1-zwayland-client.h>
 #include <zwwm-focus-grab-v1-zwayland-client.h>
-#include <xdg-shell-zwayland-client.h>
 #include <linux-dmabuf-zwayland-client.h>
-#include <session-lock-zwayland-client.h>
 #include <wayland-zwayland-client.h>
 #include <zwayland/client/core.hpp>
 #include <zwayland/client/display.hpp>
@@ -81,57 +78,14 @@ void write_all(int fd, std::string_view text) {
   }
 }
 
-struct Reservation {
-  std::uint32_t anchor;
-  std::int32_t zone;
-};
-
-Reservation reservation(const Scene& scene, std::uint32_t height) {
-  std::uint32_t anchor = scene.anchor;
-  std::int32_t zone = scene.exclusive_zone;
-  if (scene.exclusive && zone == 0) zone = static_cast<std::int32_t>(height);
-  if (zone > 0) {
-    constexpr std::uint32_t top = 1;
-    constexpr std::uint32_t bottom = 2;
-    constexpr std::uint32_t left = 4;
-    constexpr std::uint32_t right = 8;
-    if ((anchor & (top | bottom)) == top || (anchor & (top | bottom)) == bottom)
-      anchor |= left | right;
-    else if ((anchor & (left | right)) == left || (anchor & (left | right)) == right)
-      anchor |= top | bottom;
-  }
-  return {anchor, zone};
-}
-
-// Both layer-shell protocols number keyboard interactivity identically.
-std::uint32_t keyboard_interactivity(const Scene& scene) {
-  switch (scene.keyboard) {
-    case Keyboard::none: return generated::ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
-    case Keyboard::exclusive: return generated::ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE;
-    case Keyboard::on_demand: return generated::ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND;
-    case Keyboard::automatic: break;
-  }
-  return !scene.text_fields.empty() || scene.on_key
-      ? generated::ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND
-      : generated::ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
-}
-
 struct Globals {
+  roles::Role* role = nullptr;
   std::uint32_t compositor = 0;
   std::uint32_t compositor_version = 0;
   std::uint32_t dmabuf = 0;
   std::uint32_t dmabuf_version = 0;
-  std::uint32_t layer_shell = 0;
-  std::uint32_t layer_shell_version = 0;
-  std::uint32_t native_layer_shell = 0;
-  std::uint32_t native_layer_shell_version = 0;
   std::uint32_t focus_grab_manager = 0;
   std::uint32_t focus_grab_version = 0;
-  std::uint32_t xdg_wm_base = 0;
-  std::uint32_t xdg_wm_base_version = 0;
-  std::uint32_t lock_manager = 0;
-  std::uint32_t lock_manager_version = 0;
-  std::vector<std::pair<std::uint32_t, std::uint32_t>> outputs;
   std::uint32_t seat = 0;
   std::uint32_t seat_version = 0;
   std::uint32_t data_device_manager = 0;
@@ -147,23 +101,9 @@ struct Globals {
     } else if (interface == generated::zwp_linux_dmabuf_v1_interface.name) {
       dmabuf = name;
       dmabuf_version = version;
-    } else if (interface == generated::zwlr_layer_shell_v1_interface.name) {
-      layer_shell = name;
-      layer_shell_version = version;
-    } else if (interface == generated::zwwm_layer_shell_v1_interface.name) {
-      native_layer_shell = name;
-      native_layer_shell_version = version;
     } else if (interface == generated::zwwm_focus_grab_manager_v1_interface.name) {
       focus_grab_manager = name;
       focus_grab_version = version;
-    } else if (interface == generated::xdg_wm_base_interface.name) {
-      xdg_wm_base = name;
-      xdg_wm_base_version = version;
-    } else if (interface == generated::ext_session_lock_manager_v1_interface.name) {
-      lock_manager = name;
-      lock_manager_version = version;
-    } else if (interface == generated::wl_output_interface.name) {
-      outputs.emplace_back(name, version);
     } else if (interface == generated::wl_seat_interface.name) {
       seat = name;
       seat_version = version;
@@ -173,6 +113,8 @@ struct Globals {
     } else if (interface == generated::zwlr_data_control_manager_v1_interface.name) {
       data_control_manager = name;
       data_control_manager_version = version;
+    } else {
+      role->global(name, interface, version);
     }
   }
 
@@ -236,26 +178,14 @@ struct WaylandWidget::KeyboardState {
   }
 };
 
-struct WaylandWidget::LockOutput {
-  std::uint32_t global_name = 0;
-  std::string name;
-  client::Proxy* output = nullptr;
-  client::Proxy* surface = nullptr;
-  client::Proxy* lock_surface = nullptr;
-  client::Proxy* buffer = nullptr;
-  Scene scene;
-  std::uint32_t width = 0;
-  std::uint32_t height = 0;
-  bool configured = false;
-};
-
 WaylandWidget::WaylandWidget(const Scene& scene, const Frame& frame)
     : display_(zwayland::client::Display::connect()), scene_(scene),
       width_(frame.width), height_(frame.height) {
   if (!display_) throw std::runtime_error("could not connect to the Wayland compositor");
+  role_ = roles::make_role(scene_, *this);
   discover_globals();
-  if (!scene_.session_lock) create_buffer(frame);
-  create_surface(scene);
+  if (roles::uses_widget_buffer(scene_)) create_buffer(frame);
+  role_->create();
   // Data control works without input, so the first surface can serve the
   // clipboard until another one receives input.
   if (clipboard_surface == nullptr) clipboard_surface = this;
@@ -270,37 +200,7 @@ WaylandWidget::~WaylandWidget() {
     } catch (...) {}
   }
   set_focus_grab_state(false, false);
-  if (display_ && xdg_toplevel_ != nullptr) {
-    try {
-      generated::xdg_toplevel_destroy(*display_, xdg_toplevel_->id);
-      generated::xdg_surface_destroy(*display_, xdg_surface_->id);
-      generated::xdg_wm_base_destroy(*display_, xdg_wm_base_->id);
-      (void)display_->flush();
-    } catch (...) {}
-  }
-  if (display_ && scene_.session_lock) {
-    try {
-      if (session_lock_ != nullptr && !session_locked_) {
-        generated::ext_session_lock_v1_destroy(*display_, session_lock_->id);
-        session_lock_ = nullptr;
-      }
-      for (const auto& entry : lock_outputs_) {
-        if (entry->lock_surface != nullptr)
-          generated::ext_session_lock_surface_v1_destroy(*display_, entry->lock_surface->id);
-        if (entry->surface != nullptr)
-          generated::wl_surface_destroy(*display_, entry->surface->id);
-        if (entry->buffer != nullptr)
-          generated::wl_buffer_destroy(*display_, entry->buffer->id);
-        if (entry->output != nullptr && entry->output->version >= 3)
-          generated::wl_output_release(*display_, entry->output->id);
-      }
-      if (lock_manager_ != nullptr)
-        generated::ext_session_lock_manager_v1_destroy(*display_, lock_manager_->id);
-      (void)display_->flush();
-    } catch (...) {}
-  }
-  // A locked session must not receive ext_session_lock_v1.destroy. If the
-  // client exits unexpectedly, the compositor remains locked by protocol.
+  if (display_ && role_) role_->destroy();
   set_session_locked(false);
   if (clipboard_surface == this) clipboard_surface = nullptr;
   // The selection dies with this connection.
@@ -315,7 +215,7 @@ void WaylandWidget::discover_globals() {
   client::Proxy* registry = client::core::get_registry(*display_);
   if (registry == nullptr) throw std::runtime_error("could not create the Wayland registry");
   registry_ = registry;
-  Globals globals;
+  Globals globals{role_.get()};
   struct RegistryEvents {
     Globals* globals;
     void global(client::Proxy& proxy, std::uint32_t name, const std::string& interface,
@@ -328,63 +228,15 @@ void WaylandWidget::discover_globals() {
   };
   registry->set_observer(generated::wl_registry_observer(RegistryEvents{&globals}));
   if (!display_->roundtrip()) throw std::runtime_error("Wayland registry roundtrip failed");
-  if (globals.compositor == 0 || globals.dmabuf == 0 ||
-      (scene_.session_lock ? globals.lock_manager == 0 || globals.outputs.empty()
-       : scene_.toplevel ? globals.xdg_wm_base == 0
-       : globals.layer_shell == 0 && globals.native_layer_shell == 0)) {
-    throw std::runtime_error(scene_.session_lock
-        ? "compositor requires linux-dmabuf, ext_session_lock_manager_v1, and an output"
-        : scene_.toplevel ? "compositor requires wl_compositor, linux-dmabuf, and xdg_wm_base"
-        : "compositor requires wl_compositor, linux-dmabuf, and a layer-shell protocol");
-  }
+  if (globals.compositor == 0 || globals.dmabuf == 0)
+    throw std::runtime_error("compositor requires wl_compositor and linux-dmabuf");
   compositor_ = client::core::bind(
       *display_, *registry, globals.compositor, generated::wl_compositor_interface,
       std::min(globals.compositor_version, generated::wl_compositor_interface.version));
   dmabuf_ = client::core::bind(*display_, *registry, globals.dmabuf,
       generated::zwp_linux_dmabuf_v1_interface, std::min(3U, globals.dmabuf_version));
-  if (scene_.session_lock) {
-    lock_manager_ = client::core::bind(*display_, *registry, globals.lock_manager,
-        generated::ext_session_lock_manager_v1_interface,
-        std::min(globals.lock_manager_version,
-                 generated::ext_session_lock_manager_v1_interface.version));
-    if (lock_manager_ == nullptr) throw std::runtime_error("could not bind session lock manager");
-    for (const auto& [name, version] : globals.outputs) add_lock_output(name, version);
-    if (!display_->roundtrip()) throw std::runtime_error("Wayland output roundtrip failed");
-    struct RegistryChanges {
-      WaylandWidget* widget;
-      void global(client::Proxy&, std::uint32_t name, const std::string& interface,
-                  std::uint32_t version) {
-        if (interface == generated::wl_output_interface.name)
-          widget->add_lock_output(name, version);
-      }
-      void global_remove(client::Proxy&, std::uint32_t name) {
-        widget->remove_lock_output(name);
-      }
-    };
-    registry->set_observer(generated::wl_registry_observer(RegistryChanges{this}));
-  } else if (scene_.toplevel) {
-    xdg_wm_base_ = client::core::bind(*display_, *registry, globals.xdg_wm_base,
-        generated::xdg_wm_base_interface,
-        std::min(globals.xdg_wm_base_version, generated::xdg_wm_base_interface.version));
-    if (xdg_wm_base_ == nullptr) throw std::runtime_error("could not bind xdg_wm_base");
-    struct WmEvents {
-      client::Display* display;
-      void ping(client::Proxy& proxy, std::uint32_t serial) {
-        generated::xdg_wm_base_pong(*display, proxy.id, serial);
-        if (!display->flush()) throw std::runtime_error("could not answer xdg_wm_base ping");
-      }
-    };
-    xdg_wm_base_->set_observer(generated::xdg_wm_base_observer(WmEvents{display_.get()}));
-  } else {
-    native_layer_shell_ = globals.native_layer_shell != 0;
-    layer_shell_ = native_layer_shell_
-        ? client::core::bind(*display_, *registry, globals.native_layer_shell,
-            generated::zwwm_layer_shell_v1_interface,
-            std::min(globals.native_layer_shell_version, generated::zwwm_layer_shell_v1_interface.version))
-        : client::core::bind(*display_, *registry, globals.layer_shell,
-            generated::zwlr_layer_shell_v1_interface,
-            std::min(globals.layer_shell_version, generated::zwlr_layer_shell_v1_interface.version));
-  }
+  if (compositor_ == nullptr || dmabuf_ == nullptr)
+    throw std::runtime_error("could not bind required Wayland globals");
   if (globals.seat != 0) {
     seat_ = client::core::bind(*display_, *registry, globals.seat, generated::wl_seat_interface,
                                std::min(globals.seat_version, generated::wl_seat_interface.version));
@@ -416,24 +268,19 @@ void WaylandWidget::discover_globals() {
     }
     if (!display_->roundtrip()) throw std::runtime_error("Wayland seat roundtrip failed");
   }
-  if (compositor_ == nullptr || dmabuf_ == nullptr ||
-      (scene_.session_lock ? lock_manager_ == nullptr
-       : scene_.toplevel ? xdg_wm_base_ == nullptr : layer_shell_ == nullptr)) {
-    throw std::runtime_error("could not bind required Wayland globals");
-  }
-  if (!scene_.toplevel && !scene_.session_lock && globals.focus_grab_manager != 0) {
+  if (role_->focus_grab() && globals.focus_grab_manager != 0) {
     focus_grab_manager_ = client::core::bind(*display_, *registry, globals.focus_grab_manager,
         generated::zwwm_focus_grab_manager_v1_interface,
         std::min(globals.focus_grab_version, generated::zwwm_focus_grab_manager_v1_interface.version));
     set_focus_grab_state(focus_grab_manager_ != nullptr, false);
   }
-  if (!scene_.session_lock) {
-    // Globals was a discovery-local object; don't retain a dangling registry
-    // observer when the compositor later advertises/removes another global.
-    registry->set_observer([](client::Proxy& proxy, std::uint32_t opcode, wire::MessageParser& parser) {
-      parser.discard(proxy.interface->events[opcode].signature);
-    });
-  }
+  // Globals was a discovery-local object; don't retain a dangling registry
+  // observer when the compositor later advertises/removes another global.
+  // A role that follows the registry replaces this in bind().
+  registry->set_observer([](client::Proxy& proxy, std::uint32_t opcode, wire::MessageParser& parser) {
+    parser.discard(proxy.interface->events[opcode].signature);
+  });
+  role_->bind();
 }
 
 void WaylandWidget::create_data_device() {
@@ -646,14 +493,11 @@ void WaylandWidget::create_keyboard() {
       clipboard_surface = this;
       const std::uint32_t surface_id = parser.read_object();
       (void)parser.read_array();
-      if (scene_.session_lock) {
-        keyboard_lock_surface_ = surface_id;
-        activate_lock_surface(surface_id);
-      }
+      role_->keyboard_enter(surface_id);
     } else if (opcode == generated::ZWAYLAND_WL_KEYBOARD_EVENT_LEAVE_OPCODE) {
       (void)parser.read_uint();
       const std::uint32_t surface_id = parser.read_object();
-      if (keyboard_lock_surface_ == surface_id) keyboard_lock_surface_ = 0;
+      role_->keyboard_leave(surface_id);
       stop_key_repeat();
     } else if (opcode == generated::ZWAYLAND_WL_KEYBOARD_EVENT_KEY_OPCODE) {
       const std::uint32_t serial = parser.read_uint();
@@ -702,8 +546,7 @@ void WaylandWidget::create_pointer() {
     std::int32_t vertical_120 = 0;
     bool has_120 = false;
     void enter(client::Proxy&, std::uint32_t, client::Proxy* surface, double x, double y) {
-      if (surface != nullptr && widget->scene_.session_lock)
-        widget->activate_lock_surface(surface->id);
+      if (surface != nullptr) widget->role_->pointer_enter(surface->id);
       if (surface != widget->surface_) return;
       widget->pointer_inside_ = true;
       widget->pointer_motion(x, y);
@@ -782,168 +625,6 @@ void WaylandWidget::create_buffer_for(const Frame& frame, client::Proxy*& target
   if (target == nullptr) throw std::runtime_error("could not create wl_buffer");
 }
 
-void WaylandWidget::add_lock_output(std::uint32_t name, std::uint32_t version) {
-  if (!scene_.session_lock) return;
-  for (const auto& entry : lock_outputs_)
-    if (entry->global_name == name) return;
-  auto entry = std::make_unique<LockOutput>();
-  entry->global_name = name;
-  entry->name = "output-" + std::to_string(name);
-  entry->output = client::core::bind(*display_, *registry_, name,
-      generated::wl_output_interface, std::min(version, generated::wl_output_interface.version));
-  if (entry->output == nullptr) throw std::runtime_error("could not bind lock output");
-  struct OutputEvents {
-    LockOutput* entry;
-    void geometry(client::Proxy&, std::int32_t, std::int32_t, std::int32_t,
-                  std::int32_t, std::int32_t, const std::string&,
-                  const std::string&, std::int32_t) {}
-    void mode(client::Proxy&, std::uint32_t, std::int32_t, std::int32_t, std::int32_t) {}
-    void done(client::Proxy&) {}
-    void scale(client::Proxy&, std::int32_t) {}
-    void name(client::Proxy&, const std::string& name) { entry->name = name; }
-    void description(client::Proxy&, const std::string&) {}
-  };
-  entry->output->set_observer(generated::wl_output_observer(OutputEvents{entry.get()}));
-  lock_outputs_.push_back(std::move(entry));
-  if (session_lock_ != nullptr && lock_surfaces_started_) {
-    create_lock_surface(name);
-    if (!display_->flush()) throw std::runtime_error("could not flush new lock output");
-  }
-}
-
-void WaylandWidget::remove_lock_output(std::uint32_t name) {
-  const auto found = std::ranges::find_if(lock_outputs_,
-      [name](const auto& entry) { return entry->global_name == name; });
-  if (found == lock_outputs_.end()) return;
-  auto& entry = *found;
-  if (entry->lock_surface != nullptr)
-    generated::ext_session_lock_surface_v1_destroy(*display_, entry->lock_surface->id);
-  if (entry->surface != nullptr) generated::wl_surface_destroy(*display_, entry->surface->id);
-  if (entry->buffer != nullptr) generated::wl_buffer_destroy(*display_, entry->buffer->id);
-  if (entry->output != nullptr) {
-    entry->output->set_observer([](client::Proxy& proxy, std::uint32_t opcode,
-                                   wire::MessageParser& parser) {
-      parser.discard(proxy.interface->events[opcode].signature);
-    });
-  }
-  if (entry->output != nullptr && entry->output->version >= 3)
-    generated::wl_output_release(*display_, entry->output->id);
-  if (active_lock_output_ == name) {
-    active_lock_output_ = 0;
-    surface_ = nullptr;
-  }
-  lock_outputs_.erase(found);
-  if (active_lock_output_ == 0 && !lock_outputs_.empty() && lock_outputs_.front()->configured)
-    activate_lock_surface(lock_outputs_.front()->surface->id);
-}
-
-void WaylandWidget::create_lock_surface(std::uint32_t name) {
-  const auto found = std::ranges::find_if(lock_outputs_,
-      [name](const auto& entry) { return entry->global_name == name; });
-  if (found == lock_outputs_.end()) return;
-  LockOutput& entry = **found;
-  const auto surface_id = generated::wl_compositor_create_surface(*display_, compositor_->id);
-  entry.surface = display_->find_proxy(surface_id);
-  if (entry.surface == nullptr) throw std::runtime_error("could not create lock wl_surface");
-  const auto lock_id = generated::ext_session_lock_v1_get_lock_surface(
-      *display_, session_lock_->id, entry.surface, entry.output);
-  entry.lock_surface = display_->find_proxy(lock_id);
-  if (entry.lock_surface == nullptr) throw std::runtime_error("could not create lock surface");
-  struct LockSurfaceEvents {
-    WaylandWidget* widget;
-    std::uint32_t name;
-    void configure(client::Proxy&, std::uint32_t serial,
-                   std::uint32_t width, std::uint32_t height) {
-      widget->lock_configured(name, serial, width, height);
-    }
-  };
-  entry.lock_surface->set_observer(generated::ext_session_lock_surface_v1_observer(
-      LockSurfaceEvents{this, name}));
-}
-
-void WaylandWidget::activate_lock_surface(std::uint32_t surface_id) {
-  for (const auto& entry : lock_outputs_) {
-    if (entry->surface == nullptr || entry->surface->id != surface_id || !entry->configured)
-      continue;
-    active_lock_output_ = entry->global_name;
-    surface_ = entry->surface;
-    scene_ = entry->scene;
-    hovered_ = -1;
-    pressed_ = -1;
-    return;
-  }
-}
-
-void WaylandWidget::lock_configured(std::uint32_t name, std::uint32_t serial,
-                                    std::uint32_t width, std::uint32_t height) {
-  const auto found = std::ranges::find_if(lock_outputs_,
-      [name](const auto& entry) { return entry->global_name == name; });
-  if (found == lock_outputs_.end()) return;
-  if (width == 0 || height == 0 || width > 8192 || height > 8192)
-    throw std::runtime_error("invalid lock surface dimensions");
-  LockOutput& entry = **found;
-  generated::ext_session_lock_surface_v1_ack_configure(*display_, entry.lock_surface->id, serial);
-  entry.width = width;
-  entry.height = height;
-  if (renderer_ != nullptr) render_lock_output(name);
-}
-
-void WaylandWidget::present_lock_output(std::uint32_t name, const Scene& scene,
-                                        const Frame& frame) {
-  const auto found = std::ranges::find_if(lock_outputs_,
-      [name](const auto& entry) { return entry->global_name == name; });
-  if (found == lock_outputs_.end()) return;
-  LockOutput& entry = **found;
-  if (frame.width != entry.width || frame.height != entry.height)
-    throw std::runtime_error("lock buffer does not match configured output dimensions");
-  create_buffer_for(frame, entry.buffer);
-  generated::wl_surface_attach(*display_, entry.surface->id, entry.buffer, 0, 0);
-  generated::wl_surface_damage_buffer(*display_, entry.surface->id, 0, 0,
-                                      static_cast<std::int32_t>(entry.width),
-                                      static_cast<std::int32_t>(entry.height));
-  if (wants_frame()) add_frame_callback(entry.surface->id);
-  generated::wl_surface_commit(*display_, entry.surface->id);
-  if (!display_->flush()) throw std::runtime_error("could not flush lock surface");
-  entry.scene = scene;
-  entry.configured = true;
-  if (active_lock_output_ == 0 || active_lock_output_ == name)
-    activate_lock_surface(entry.surface->id);
-  if (keyboard_lock_surface_ == entry.surface->id)
-    activate_lock_surface(entry.surface->id);
-}
-
-void WaylandWidget::render_lock_output(std::uint32_t name) {
-  const auto found = std::ranges::find_if(lock_outputs_,
-      [name](const auto& entry) { return entry->global_name == name; });
-  if (found == lock_outputs_.end() || (*found)->width == 0 || renderer_ == nullptr) return;
-  LockOutput& entry = **found;
-  set_lock_surface_context(entry.width, entry.height, entry.name);
-  set_surface_size({entry.width, entry.height});
-  const Scene next = source_->build();
-  // A locked session cannot be dropped; keep the last lock scene.
-  if (!next.mapped) return;
-  if (!next.session_lock || next.width != entry.width || next.height != entry.height)
-    throw std::runtime_error("lock screen must render at its configured output size");
-  if (entry.configured && next.rectangles == entry.scene.rectangles &&
-      next.rasters == entry.scene.rasters) {
-    entry.scene = next;
-    if (active_lock_output_ == name) scene_ = next;
-    return;
-  }
-  Frame frame = renderer_->render(next);
-  present_lock_output(name, next, frame);
-}
-
-void WaylandWidget::unlock_session() {
-  if (session_lock_ == nullptr || !session_locked_ || !session_unlock_requested()) return;
-  generated::ext_session_lock_v1_unlock_and_destroy(*display_, session_lock_->id);
-  session_lock_ = nullptr;
-  if (!display_->roundtrip()) throw std::runtime_error("could not confirm session unlock");
-  set_session_locked(false);
-  session_locked_ = false;
-  closed_ = true;
-}
-
 void WaylandWidget::configure_surface_input(const Scene& scene) {
   if (scene.accepts_input && !scene.selective_input) {
     generated::wl_surface_set_input_region(*display_, surface_->id, nullptr);
@@ -960,203 +641,8 @@ void WaylandWidget::configure_surface_input(const Scene& scene) {
   generated::wl_region_destroy(*display_, region->id);
 }
 
-void WaylandWidget::create_surface(const Scene& scene) {
-  using namespace zwayland;
-  if (scene.session_lock) {
-    reset_session_authentication();
-    const auto lock_id = generated::ext_session_lock_manager_v1_lock(
-        *display_, lock_manager_->id);
-    session_lock_ = display_->find_proxy(lock_id);
-    if (session_lock_ == nullptr) throw std::runtime_error("could not create session lock");
-    struct LockEvents {
-      WaylandWidget* widget;
-      void locked(client::Proxy&) {
-        widget->session_locked_ = true;
-        set_session_locked(true);
-      }
-      void finished(client::Proxy&) {
-        if (widget->session_lock_ != nullptr) {
-          if (widget->session_locked_)
-            generated::ext_session_lock_v1_unlock_and_destroy(
-                *widget->display_, widget->session_lock_->id);
-          else generated::ext_session_lock_v1_destroy(
-                *widget->display_, widget->session_lock_->id);
-          widget->session_lock_ = nullptr;
-          set_session_locked(false);
-          if (!widget->display_->flush())
-            throw std::runtime_error("could not finish session lock");
-        }
-        widget->closed_ = true;
-      }
-    };
-    session_lock_->set_observer(generated::ext_session_lock_v1_observer(LockEvents{this}));
-    if (!display_->roundtrip()) throw std::runtime_error("session lock request failed");
-    if (session_lock_ == nullptr) return;
-    lock_surfaces_started_ = true;
-    for (const auto& output : lock_outputs_) create_lock_surface(output->global_name);
-    if (!display_->flush()) throw std::runtime_error("could not flush session lock request");
-    return;
-  }
-  const std::uint32_t surface_id =
-      generated::wl_compositor_create_surface(*display_, compositor_->id);
-  surface_ = display_->find_proxy(surface_id);
-  if (surface_ == nullptr) throw std::runtime_error("could not create wl_surface");
-  configure_surface_input(scene);
-
-  if (scene.toplevel) {
-    const auto xdg_id = generated::xdg_wm_base_get_xdg_surface(
-        *display_, xdg_wm_base_->id, surface_);
-    xdg_surface_ = display_->find_proxy(xdg_id);
-    if (xdg_surface_ == nullptr) throw std::runtime_error("could not create xdg_surface");
-    struct SurfaceEvents {
-      WaylandWidget* widget;
-      void configure(client::Proxy&, std::uint32_t serial) {
-        widget->xdg_configured(serial);
-      }
-    };
-    xdg_surface_->set_observer(generated::xdg_surface_observer(SurfaceEvents{this}));
-    const auto toplevel_id = generated::xdg_surface_get_toplevel(*display_, xdg_surface_->id);
-    xdg_toplevel_ = display_->find_proxy(toplevel_id);
-    if (xdg_toplevel_ == nullptr) throw std::runtime_error("could not create xdg_toplevel");
-    struct ToplevelEvents {
-      WaylandWidget* widget;
-      void configure(client::Proxy&, std::int32_t width, std::int32_t height,
-                     std::span<const std::byte>) {
-        widget->toplevel_configured(width, height);
-      }
-      void close(client::Proxy&) { widget->closed(); }
-      void configure_bounds(client::Proxy&, std::int32_t, std::int32_t) {}
-      void wm_capabilities(client::Proxy&, std::span<const std::byte>) {}
-    };
-    xdg_toplevel_->set_observer(generated::xdg_toplevel_observer(ToplevelEvents{this}));
-    generated::xdg_toplevel_set_title(*display_, xdg_toplevel_->id, scene.title);
-    generated::xdg_toplevel_set_app_id(*display_, xdg_toplevel_->id, scene.app_id);
-    generated::wl_surface_commit(*display_, surface_->id);
-    if (!display_->flush()) throw std::runtime_error("could not flush initial xdg surface state");
-    return;
-  }
-
-  const std::uint32_t layer_id = native_layer_shell_
-      ? generated::zwwm_layer_shell_v1_get_layer_surface(
-            *display_, layer_shell_->id, surface_, nullptr, scene.layer, scene.surface_namespace)
-      : generated::zwlr_layer_shell_v1_get_layer_surface(
-            *display_, layer_shell_->id, surface_, nullptr, scene.layer, scene.surface_namespace);
-  layer_surface_ = display_->find_proxy(layer_id);
-  if (layer_surface_ == nullptr) throw std::runtime_error("could not create layer surface");
-  create_focus_grab();
-
-  struct Events {
-    WaylandWidget* widget;
-    void configure(client::Proxy&, std::uint32_t serial, std::uint32_t width,
-                   std::uint32_t height) {
-      widget->configured(serial, width, height);
-    }
-    void closed(client::Proxy&) { widget->closed(); }
-  };
-  if (native_layer_shell_)
-    layer_surface_->set_observer(generated::zwwm_layer_surface_v1_observer(Events{this}));
-  else layer_surface_->set_observer(generated::zwlr_layer_surface_v1_observer(Events{this}));
-  if (native_layer_shell_)
-    generated::zwwm_layer_surface_v1_set_size(*display_, layer_surface_->id,
-                                              scene.fill_width ? 0 : width_,
-                                              scene.fill_height ? 0 : height_);
-  else generated::zwlr_layer_surface_v1_set_size(*display_, layer_surface_->id,
-                                                 scene.fill_width ? 0 : width_,
-                                                 scene.fill_height ? 0 : height_);
-  const Reservation reserved = reservation(scene, height_);
-  if (native_layer_shell_)
-    generated::zwwm_layer_surface_v1_set_anchor(*display_, layer_surface_->id, reserved.anchor);
-  else generated::zwlr_layer_surface_v1_set_anchor(*display_, layer_surface_->id, reserved.anchor);
-  const auto& margin = scene.margin;
-  if (native_layer_shell_) {
-    generated::zwwm_layer_surface_v1_set_margin(*display_, layer_surface_->id, margin[0],
-                                                 margin[1], margin[2], margin[3]);
-    generated::zwwm_layer_surface_v1_set_exclusive_zone(*display_, layer_surface_->id, reserved.zone);
-    generated::zwwm_layer_surface_v1_set_keyboard_interactivity(*display_, layer_surface_->id,
-                                                                keyboard_interactivity(scene));
-  } else {
-    generated::zwlr_layer_surface_v1_set_margin(*display_, layer_surface_->id, margin[0],
-                                                 margin[1], margin[2], margin[3]);
-    generated::zwlr_layer_surface_v1_set_exclusive_zone(*display_, layer_surface_->id, reserved.zone);
-    generated::zwlr_layer_surface_v1_set_keyboard_interactivity(*display_, layer_surface_->id,
-                                                                keyboard_interactivity(scene));
-  }
-  generated::wl_surface_commit(*display_, surface_->id);
-  if (!display_->flush()) throw std::runtime_error("could not flush initial Wayland surface state");
-}
-
-void WaylandWidget::configured(std::uint32_t serial, std::uint32_t width,
-                               std::uint32_t height) {
-  configured_width_ = width == 0 ? width_ : width;
-  configured_height_ = height == 0 ? height_ : height;
-  using namespace zwayland;
-  if (native_layer_shell_)
-    generated::zwwm_layer_surface_v1_ack_configure(*display_, layer_surface_->id, serial);
-  else generated::zwlr_layer_surface_v1_ack_configure(*display_, layer_surface_->id, serial);
-  // A fill axis takes whatever size the compositor picked; rebuild for it.
-  const bool resized = (scene_.fill_width && configured_width_ != width_) ||
-                       (scene_.fill_height && configured_height_ != height_);
-  if (configured_) {
-    if (resized) refresh_scene(false);
-    if (!display_->flush()) throw std::runtime_error("could not acknowledge layer configure");
-    return;
-  }
-  if (resized && renderer_ != nullptr && source_ != nullptr) {
-    // The first frame goes out at the configured size; reload() attaches it.
-    configured_ = true;
-    refresh_scene(false);
-    const bool attached = !((scene_.fill_width && configured_width_ != width_) ||
-                            (scene_.fill_height && configured_height_ != height_));
-    if (attached) {
-      update_focus_grab();
-      if (!display_->flush()) throw std::runtime_error("could not present configured layer surface");
-      return;
-    }
-    // The rebuild failed; present the content-sized frame rather than nothing.
-  }
-  generated::wl_surface_attach(*display_, surface_->id, buffer_, 0, 0);
-  generated::wl_surface_damage_buffer(*display_, surface_->id, 0, 0,
-                                      static_cast<std::int32_t>(width_),
-                                      static_cast<std::int32_t>(height_));
-  generated::wl_surface_commit(*display_, surface_->id);
-  configured_ = true;
-  update_focus_grab();
-  if (!display_->flush()) throw std::runtime_error("could not present configured layer surface");
-}
-
-void WaylandWidget::toplevel_configured(std::int32_t width, std::int32_t height) {
-  pending_width_ = width > 0 ? static_cast<std::uint32_t>(width) : 0;
-  pending_height_ = height > 0 ? static_cast<std::uint32_t>(height) : 0;
-}
-
-void WaylandWidget::xdg_configured(std::uint32_t serial) {
-  generated::xdg_surface_ack_configure(*display_, xdg_surface_->id, serial);
-  const std::uint32_t target_width = pending_width_ == 0 ? width_ : pending_width_;
-  const std::uint32_t target_height = pending_height_ == 0 ? height_ : pending_height_;
-  set_toplevel_size(pending_width_, pending_height_);
-  pending_width_ = 0;
-  pending_height_ = 0;
-  configured_width_ = target_width;
-  configured_height_ = target_height;
-  const bool resized = target_width != width_ || target_height != height_;
-  if (!configured_) {
-    generated::xdg_surface_set_window_geometry(
-        *display_, xdg_surface_->id, 0, 0, width_, height_);
-    generated::wl_surface_attach(*display_, surface_->id, buffer_, 0, 0);
-    generated::wl_surface_damage_buffer(*display_, surface_->id, 0, 0,
-                                        static_cast<std::int32_t>(width_),
-                                        static_cast<std::int32_t>(height_));
-    configured_ = true;
-  }
-  generated::wl_surface_commit(*display_, surface_->id);
-  if (!display_->flush()) throw std::runtime_error("could not flush configured xdg surface");
-  if (resized && renderer_ != nullptr) refresh_scene(false);
-}
-
-void WaylandWidget::closed() { closed_ = true; }
-
 void WaylandWidget::create_focus_grab() {
-  if (focus_grab_manager_ == nullptr || focus_grab_ != nullptr || layer_surface_ == nullptr) return;
+  if (focus_grab_manager_ == nullptr || focus_grab_ != nullptr || !role_->focus_grab()) return;
   const auto id = generated::zwwm_focus_grab_manager_v1_get_grab(
       *display_, focus_grab_manager_->id, surface_);
   focus_grab_ = display_->find_proxy(id);
@@ -1417,14 +903,10 @@ void WaylandWidget::refresh_scene(bool input) {
   if (renderer_ == nullptr || source_ == nullptr) return;
   if (input) seen_epoch_ = ++global_input_epoch;
   try {
-    if (scene_.session_lock) {
-      for (const auto& entry : lock_outputs_)
-        if (entry->configured) render_lock_output(entry->global_name);
-      return;
-    }
+    if (role_->refresh()) return;
     set_surface_size({configured_width_, configured_height_});
     Scene next = source_->build();
-    if (!next.mapped || next.toplevel != scene_.toplevel || next.session_lock != scene_.session_lock) {
+    if (!next.mapped || roles::kind(next) != roles::kind(scene_)) {
       retired_ = true;
       return;
     }
@@ -1712,7 +1194,7 @@ bool WaylandWidget::wants_frame() const {
 
 void WaylandWidget::request_animation_frame() {
   if (closed_ || frame_callback_ != 0 || surface_ == nullptr ||
-      (!configured_ && !scene_.session_lock)) return;
+      !role_->ready()) return;
   if (!wants_frame()) {
     animation_last_tick_ = {};
     return;
@@ -1743,18 +1225,9 @@ void WaylandWidget::add_frame_callback(std::uint32_t surface) {
 }
 
 void WaylandWidget::reload(const Scene& scene, const Frame& frame) {
-  if (scene.toplevel != scene_.toplevel || scene.session_lock != scene_.session_lock)
+  if (roles::kind(scene) != roles::kind(scene_))
     throw std::runtime_error("cannot change Wayland surface role on reload");
-  if (scene_.session_lock) {
-    if (&scene != &scene_) { refresh_scene(); return; }
-    if (active_lock_output_ != 0)
-      present_lock_output(active_lock_output_, scene_, frame);
-    return;
-  }
-  const bool layer_metadata_changed = scene.anchor != scene_.anchor || scene.layer != scene_.layer ||
-      scene.margin != scene_.margin || scene.exclusive != scene_.exclusive ||
-      scene.exclusive_zone != scene_.exclusive_zone ||
-      keyboard_interactivity(scene) != keyboard_interactivity(scene_);
+  if (role_->reload(scene, frame)) return;
   const bool buffer_size_changed = frame.width != width_ || frame.height != height_;
   const Frame* next_frame = &frame;
   std::optional<Frame> retained_hover_frame;
@@ -1792,66 +1265,10 @@ void WaylandWidget::reload(const Scene& scene, const Frame& frame) {
   width_ = next_frame->width;
   height_ = next_frame->height;
   create_buffer(*next_frame);
-  using namespace zwayland;
   // Service events and animation ticks can arrive before the initial role
   // configure. Keep the newest wl_buffer ready, but never attach it before ack.
   if (!configured_) return;
-  if (scene_.toplevel) {
-    configure_surface_input(scene_);
-    generated::xdg_toplevel_set_title(*display_, xdg_toplevel_->id, scene_.title);
-    generated::xdg_toplevel_set_app_id(*display_, xdg_toplevel_->id, scene_.app_id);
-    generated::xdg_surface_set_window_geometry(*display_, xdg_surface_->id, 0, 0,
-                                                width_, height_);
-    generated::wl_surface_attach(*display_, surface_->id, buffer_, 0, 0);
-    generated::wl_surface_damage_buffer(*display_, surface_->id, 0, 0,
-                                        static_cast<std::int32_t>(width_),
-                                        static_cast<std::int32_t>(height_));
-    if (wants_frame()) add_frame_callback(surface_->id);
-    generated::wl_surface_commit(*display_, surface_->id);
-    if (!display_->flush()) throw std::runtime_error("could not flush reloaded xdg surface");
-    return;
-  }
-  if (buffer_size_changed) {
-    if (native_layer_shell_)
-      generated::zwwm_layer_surface_v1_set_size(*display_, layer_surface_->id,
-                                                scene.fill_width ? 0 : width_,
-                                                scene.fill_height ? 0 : height_);
-    else generated::zwlr_layer_surface_v1_set_size(*display_, layer_surface_->id,
-                                                   scene.fill_width ? 0 : width_,
-                                                   scene.fill_height ? 0 : height_);
-  }
-  const Reservation reserved = reservation(scene, height_);
-  configure_surface_input(scene);
-  if (layer_metadata_changed && native_layer_shell_) {
-    generated::zwwm_layer_surface_v1_set_anchor(*display_, layer_surface_->id, reserved.anchor);
-    generated::zwwm_layer_surface_v1_set_layer(*display_, layer_surface_->id, scene.layer);
-  } else if (layer_metadata_changed) {
-    generated::zwlr_layer_surface_v1_set_anchor(*display_, layer_surface_->id, reserved.anchor);
-    generated::zwlr_layer_surface_v1_set_layer(*display_, layer_surface_->id, scene.layer);
-  }
-  const auto& margin = scene.margin;
-  if (layer_metadata_changed && native_layer_shell_) {
-    generated::zwwm_layer_surface_v1_set_margin(*display_, layer_surface_->id, margin[0],
-                                                 margin[1], margin[2], margin[3]);
-    generated::zwwm_layer_surface_v1_set_exclusive_zone(*display_, layer_surface_->id, reserved.zone);
-    generated::zwwm_layer_surface_v1_set_keyboard_interactivity(*display_, layer_surface_->id,
-                                                                keyboard_interactivity(scene));
-  } else if (layer_metadata_changed) {
-    generated::zwlr_layer_surface_v1_set_margin(*display_, layer_surface_->id, margin[0],
-                                                 margin[1], margin[2], margin[3]);
-    generated::zwlr_layer_surface_v1_set_exclusive_zone(*display_, layer_surface_->id, reserved.zone);
-    generated::zwlr_layer_surface_v1_set_keyboard_interactivity(*display_, layer_surface_->id,
-                                                                keyboard_interactivity(scene));
-  }
-  generated::wl_surface_attach(*display_, surface_->id, buffer_, 0, 0);
-  generated::wl_surface_damage_buffer(*display_, surface_->id, 0, 0,
-                                      static_cast<std::int32_t>(width_),
-                                      static_cast<std::int32_t>(height_));
-  if (wants_frame()) add_frame_callback(surface_->id);
-  generated::wl_surface_commit(*display_, surface_->id);
-  update_focus_grab();
-  if (!display_->flush()) throw std::runtime_error(display_->has_error()
-      ? display_->error_message() : "could not flush reloaded widget");
+  role_->present(buffer_size_changed);
 }
 
 namespace {
@@ -1929,10 +1346,7 @@ int WaylandWidget::fd() const { return display_->fd(); }
 bool WaylandWidget::animating() const { return scene_.animating; }
 
 void WaylandWidget::prepare() {
-  if (session_lock_ != nullptr && session_locked_ && session_unlock_requested()) {
-    unlock_session();
-    return;
-  }
+  if (role_->prepare()) return;
   request_animation_frame();
 }
 
@@ -2019,8 +1433,8 @@ void materialize(Slot& slot, Renderer& renderer) {
     set_surface_size({});
     const Scene scene = slot.source->build();
     if (!scene.mapped) return;
-    const Frame frame = scene.session_lock ? Frame(scene.width, scene.height, -1, 0, 0)
-                                           : renderer.render(scene);
+    const Frame frame = roles::uses_widget_buffer(scene) ? renderer.render(scene)
+                                                         : Frame(scene.width, scene.height, -1, 0, 0);
     slot.widget = std::make_unique<WaylandWidget>(scene, frame);
     slot.widget->attach(*slot.source, renderer);
     slot.widget->mark_epoch(global_input_epoch);
@@ -2066,8 +1480,8 @@ void run_surfaces(SceneSource& shared, std::span<SceneSource* const> surfaces, R
     set_surface_size({});
     const Scene scene = slot.source->build();
     if (!scene.mapped) continue;
-    const Frame frame = scene.session_lock ? Frame(scene.width, scene.height, -1, 0, 0)
-                                           : renderer.render(scene);
+    const Frame frame = roles::uses_widget_buffer(scene) ? renderer.render(scene)
+                                                         : Frame(scene.width, scene.height, -1, 0, 0);
     slot.widget = std::make_unique<WaylandWidget>(scene, frame);
     slot.widget->attach(*slot.source, renderer);
   }
