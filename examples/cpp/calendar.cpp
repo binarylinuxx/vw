@@ -14,10 +14,10 @@ using namespace std::chrono;
 
 int month_offset = 0;
 
-const vw::Color surface = vw::rgb(0x1e1e2e);
-const vw::Color text = vw::rgb(0xcdd6f4);
-const vw::Color muted = vw::rgb(0x7f849c);
-const vw::Color accent = vw::rgb(0x89b4fa);
+const vw::Color surface = vw::rgb(0x151a1e);
+const vw::Color text = vw::rgb(0xdfe6ee);
+const vw::Color muted = vw::rgb(0x6f767d);
+const vw::Color accent = vw::rgb(0xa7cbe7);
 
 year_month_day today() {
   return year_month_day{floor<days>(zoned_time{current_zone(), system_clock::now()}.get_local_time())};
@@ -27,7 +27,7 @@ vw::Widget arrow(vw::Ui& ui, const char* glyph, float x, float y, int step) {
   const vw::Widget body = ui.rectangle({
       .width = 32, .height = 32, .radius = 16, .color = surface,
       .input = {.on_click = [step](const vw::ClickEvent&) { month_offset += step; },
-                .hover = vw::Hover{.color = vw::rgb(0x313244)}}});
+                .hover = vw::Hover{.color = vw::rgb(0x20272c)}}});
   ui.move(body, x, y);
   const vw::Widget label = ui.text({.text = glyph, .font = "sans", .size = 16, .color = text});
   ui.move(label, x + (32 - label.width) / 2, y + (32 - label.height) / 2);

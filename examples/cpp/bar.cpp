@@ -10,9 +10,9 @@
 
 int main() {
   constexpr float height = 36.0F;
-  const vw::Color surface = vw::rgb(0x1e1e2e);
-  const vw::Color text = vw::rgb(0xcdd6f4);
-  const vw::Color accent = vw::rgb(0x89b4fa);
+  const vw::Color surface = vw::rgb(0x151a1e);
+  const vw::Color text = vw::rgb(0xdfe6ee);
+  const vw::Color accent = vw::rgb(0xa7cbe7);
 
   vw::App app([&](vw::Ui& ui) {
     // The bar fills the output width; until the compositor has said how wide
@@ -42,7 +42,7 @@ int main() {
     const vw::Widget button = ui.rectangle({
         .width = 28, .height = 28, .radius = 14, .color = accent,
         .input = {.on_click = [](const vw::ClickEvent&) { vw::spawn_shell("fuzzel"); },
-                  .hover = vw::Hover{.color = vw::rgb(0xb4befe)}}});
+                  .hover = vw::Hover{.color = vw::rgb(0xbde1fe)}}});
     ui.move(button, width - 40.0F, 4.0F);
 
     ui.surface({.width = 0, .height = height, .anchor = vw::anchor::top,

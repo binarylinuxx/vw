@@ -21,13 +21,13 @@ constexpr float menu_row = 30;
 constexpr const char* font = "sans";
 constexpr std::uint32_t right_button = 273;  // BTN_RIGHT
 
-const vw::Color surface = vw::rgb(0x1e1e2e);
-const vw::Color raised = vw::rgb(0x313244);
-const vw::Color hover = vw::rgb(0x45475a);
-const vw::Color text = vw::rgb(0xcdd6f4);
-const vw::Color muted = vw::rgb(0x7f849c);
-const vw::Color accent = vw::rgb(0x89b4fa);
-const vw::Color warning = vw::rgb(0xf38ba8);
+const vw::Color surface = vw::rgb(0x151a1e);
+const vw::Color raised = vw::rgb(0x20272c);
+const vw::Color hover = vw::rgb(0x262d33);
+const vw::Color text = vw::rgb(0xdfe6ee);
+const vw::Color muted = vw::rgb(0x6f767d);
+const vw::Color accent = vw::rgb(0xa7cbe7);
+const vw::Color warning = vw::rgb(0xfa746f);
 
 struct State {
   // Tray item whose menu is open, and the menu's right edge offset.
@@ -94,7 +94,7 @@ void bar(vw::Ui& ui) {
                                                     ? all.begin() : current + 1;
                               vw::upower::set_profile(*next);
                             },
-                            .hover = vw::Hover{.color = vw::rgb(0xb4befe)}}});
+                            .hover = vw::Hover{.color = vw::rgb(0xbde1fe)}}});
     const vw::Widget front = ui.text({.text = profile, .font = font, .size = 12,
                                       .color = surface});
     ui.move(front, x + 10, (height - front.height) / 2);

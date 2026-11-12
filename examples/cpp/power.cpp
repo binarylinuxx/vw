@@ -40,7 +40,7 @@ int main() {
     const float height = size.height > 0 ? static_cast<float>(size.height) : 1080;
 
     // The dim backdrop doubles as the "click outside" target.
-    ui.rectangle({.width = width, .height = height, .color = vw::rgba(0x11111bcc),
+    ui.rectangle({.width = width, .height = height, .color = vw::rgba(0x0b0f11cc),
                   .input = {.on_click = [](const vw::ClickEvent&) { std::exit(EXIT_SUCCESS); }}});
 
     constexpr float button = 132;
@@ -53,9 +53,9 @@ int main() {
       const float x = left + static_cast<float>(index) * (button + gap);
       const vw::Widget card = ui.rectangle({
           .width = button, .height = button, .radius = 32,
-          .color = active ? vw::rgb(0x89b4fa) : vw::rgb(0x313244),
+          .color = active ? vw::rgb(0xa7cbe7) : vw::rgb(0x20272c),
           .input = {.on_click = [index](const vw::ClickEvent&) { run(index); },
-                    .hover = vw::Hover{.color = active ? vw::rgb(0xb4befe) : vw::rgb(0x45475a)}}});
+                    .hover = vw::Hover{.color = active ? vw::rgb(0xbde1fe) : vw::rgb(0x262d33)}}});
       ui.move(card, x, top);
       // Not every icon theme has these; the label is enough without one.
       if (const auto path = vw::resolve_icon(actions[index].icon, 48); !path.empty()) {
@@ -65,7 +65,7 @@ int main() {
       }
       const vw::Widget label = ui.text({.text = actions[index].label, .font = "sans", .size = 15,
                                         .weight = vw::weight::medium,
-                                        .color = active ? vw::rgb(0x1e1e2e) : vw::rgb(0xcdd6f4)});
+                                        .color = active ? vw::rgb(0x1f445b) : vw::rgb(0xdfe6ee)});
       ui.move(label, x + (button - label.width) / 2, top + button - 30 - label.height / 2);
     }
 

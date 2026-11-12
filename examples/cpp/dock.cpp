@@ -42,7 +42,7 @@ int main() {
     constexpr float pad = 8;
     const float width = cell * static_cast<float>(std::max<std::size_t>(apps.size(), 1)) + pad * 2;
     ui.rectangle({.width = width, .height = cell + pad * 2, .radius = 26,
-                  .color = vw::rgba(0x1e1e2ee8), .border_width = 1,
+                  .color = vw::rgba(0x151a1ee8), .border_width = 1,
                   .border_color = vw::rgba(0xffffff14)});
     for (std::size_t index = 0; index < apps.size(); ++index) {
       const float x = pad + cell * static_cast<float>(index);

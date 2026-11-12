@@ -106,18 +106,18 @@ void build(vw::Ui& ui) {
   constexpr float pad = 16;
   constexpr float gap = 10;
 
-  ui.rectangle({.width = width, .height = height, .radius = 32, .color = vw::rgb(0x1e1e2e),
+  ui.rectangle({.width = width, .height = height, .radius = 32, .color = vw::rgb(0x151a1e),
                 .border_width = 1, .border_color = vw::rgba(0xffffff14)});
 
   // Display, right-aligned, shrinking long numbers to fit.
   const float display_height = height * 0.28F;
   const vw::Widget history = ui.text({.text = state.history, .font = "sans", .size = 16,
-                                      .color = vw::rgb(0x7f849c)});
+                                      .color = vw::rgb(0x6f767d)});
   ui.move(history, width - pad - history.width, display_height - 76);
   const float digits = static_cast<float>(state.entry.size());
   const vw::Widget entry = ui.text({.text = state.entry, .font = "sans",
                                     .size = std::min(52.0F, (width - pad * 2) / (digits * 0.62F)),
-                                    .weight = vw::weight::light, .color = vw::rgb(0xcdd6f4)});
+                                    .weight = vw::weight::light, .color = vw::rgb(0xdfe6ee)});
   ui.move(entry, width - pad - entry.width, display_height - entry.height);
 
   // Keypad.
@@ -126,23 +126,23 @@ void build(vw::Ui& ui) {
   for (int row = 0; row < 5; ++row) {
     for (int column = 0; column < 4; ++column) {
       const Key& key = keys[row][column];
-      const vw::Color colors[] = {vw::rgb(0x313244), vw::rgb(0x45475a), vw::rgb(0x89b4fa),
-                                  vw::rgb(0xa6e3a1)};
-      const vw::Color hovers[] = {vw::rgb(0x45475a), vw::rgb(0x585b70), vw::rgb(0xb4befe),
-                                  vw::rgb(0xc6f0c2)};
+      const vw::Color colors[] = {vw::rgb(0x20272c), vw::rgb(0x262d33), vw::rgb(0xa7cbe7),
+                                  vw::rgb(0xb7c9d8)};
+      const vw::Color hovers[] = {vw::rgb(0x262d33), vw::rgb(0x42494f), vw::rgb(0xbde1fe),
+                                  vw::rgb(0xd3e5f5)};
       const bool pending = key.kind == 2 && state.pending == key.press[0] && state.fresh;
       const float x = pad + static_cast<float>(column) * (key_width + gap);
       const float y = display_height + pad + static_cast<float>(row) * (key_height + gap);
       const vw::Widget body = ui.rectangle({
           .width = key_width, .height = key_height, .radius = std::min(key_width, key_height) / 2,
-          .color = pending ? vw::rgb(0xcdd6f4) : colors[key.kind],
+          .color = pending ? vw::rgb(0xdfe6ee) : colors[key.kind],
           .input = {.on_click = [&key](const vw::ClickEvent&) { press(key.press); },
                     .hover = vw::Hover{.color = hovers[key.kind]}}});
       ui.move(body, x, y);
       const vw::Widget label = ui.text({
           .text = key.label, .font = "sans", .size = 22,
           .weight = key.kind >= 2 ? vw::weight::semibold : vw::weight::regular,
-          .color = key.kind >= 2 ? vw::rgb(0x1e1e2e) : vw::rgb(0xcdd6f4)});
+          .color = key.kind >= 2 ? vw::rgb(0x1f445b) : vw::rgb(0xdfe6ee)});
       ui.move(label, x + (key_width - label.width) / 2, y + (key_height - label.height) / 2);
     }
   }

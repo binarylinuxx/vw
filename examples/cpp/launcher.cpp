@@ -25,11 +25,11 @@ struct State {
 
 State state;
 
-const vw::Color surface = vw::rgb(0x1e1e2e);
-const vw::Color raised = vw::rgb(0x313244);
-const vw::Color text = vw::rgb(0xcdd6f4);
-const vw::Color muted = vw::rgb(0xa6adc8);
-const vw::Color accents[] = {vw::rgb(0x89b4fa), vw::rgb(0xa6e3a1), vw::rgb(0xf5c2e7)};
+const vw::Color surface = vw::rgb(0x151a1e);
+const vw::Color raised = vw::rgb(0x20272c);
+const vw::Color text = vw::rgb(0xdfe6ee);
+const vw::Color muted = vw::rgb(0xa5acb3);
+const vw::Color accents[] = {vw::rgb(0xa7cbe7), vw::rgb(0xb7c9d8), vw::rgb(0xdbddff)};
 
 void close_launcher() {
   state.open = false;

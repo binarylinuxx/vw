@@ -35,14 +35,14 @@ struct State {
 
 State state;
 
-const vw::Color background = vw::rgb(0x1e1e2e);
-const vw::Color panel = vw::rgb(0x181825);
-const vw::Color raised = vw::rgb(0x313244);
-const vw::Color hover = vw::rgb(0x45475a);
-const vw::Color text = vw::rgb(0xcdd6f4);
-const vw::Color muted = vw::rgb(0x7f849c);
-const vw::Color accent = vw::rgb(0xa6e3a1);
-const vw::Color danger = vw::rgb(0xf38ba8);
+const vw::Color background = vw::rgb(0x151a1e);
+const vw::Color panel = vw::rgb(0x0f1417);
+const vw::Color raised = vw::rgb(0x20272c);
+const vw::Color hover = vw::rgb(0x262d33);
+const vw::Color text = vw::rgb(0xdfe6ee);
+const vw::Color muted = vw::rgb(0x6f767d);
+const vw::Color accent = vw::rgb(0xb7c9d8);
+const vw::Color danger = vw::rgb(0xfa746f);
 
 std::filesystem::path store_path() {
   const char* data = std::getenv("XDG_DATA_HOME");

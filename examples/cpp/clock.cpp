@@ -22,17 +22,17 @@ int main() {
     constexpr float width = 380;
     constexpr float height = 196;
     constexpr float inset = 28;
-    ui.rectangle({.width = width, .height = height, .radius = 32, .color = vw::rgba(0x1e1e2ee0),
+    ui.rectangle({.width = width, .height = height, .radius = 32, .color = vw::rgba(0x151a1ee0),
                   .border_width = 1, .border_color = vw::rgba(0xffffff14)});
     const vw::Widget hello = ui.text({.text = greeting, .font = "sans", .size = 15,
-                                      .weight = vw::weight::medium, .color = vw::rgb(0x89b4fa)});
+                                      .weight = vw::weight::medium, .color = vw::rgb(0xa7cbe7)});
     ui.move(hello, inset, inset);
     const vw::Widget time = ui.text({.text = std::format("{:%H:%M}", now), .font = "sans",
                                      .size = 84, .weight = vw::weight::light,
-                                     .color = vw::rgb(0xcdd6f4)});
+                                     .color = vw::rgb(0xdfe6ee)});
     ui.move(time, inset - 4, inset + hello.height - 6);
     const vw::Widget date = ui.text({.text = std::format("{:%A, %d %B}", now), .font = "sans",
-                                     .size = 17, .color = vw::rgb(0xa6adc8)});
+                                     .size = 17, .color = vw::rgb(0xa5acb3)});
     ui.move(date, inset, height - inset - date.height);
 
     // Below windows, never takes input, and only rebuilds once a second.
