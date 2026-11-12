@@ -678,7 +678,15 @@ class Generator {
     if (node.children.empty()) {
       line(node.at, std::format("const vw::Widget {} = {}(ui, {});", widget, function, props));
     } else {
-      const std::string children = block(node.children);
+      // The children are built when the component asks for them, so it can
+      // draw its background first and have them land on top.
+      const std::string children = fresh("children_of");
+      line(node.at, std::format("const facet::Children {}([&](vw::Ui& ui) {{", children));
+      ++indent_;
+      const std::string list = block(node.children);
+      line(node.at, std::format("return {};", list));
+      --indent_;
+      line(node.at, "}, ui);");
       line(node.at, std::format("const vw::Widget {} = {}(ui, {}, {});", widget, function, props, children));
     }
     return widget;

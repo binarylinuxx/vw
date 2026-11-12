@@ -125,6 +125,34 @@ inline vw::Widget group(vw::Ui& ui, const std::vector<vw::Widget>& children) {
   return children.size() == 1 ? children.front() : column(ui, children, {});
 }
 
+// The children of a C++ component, built when the component asks:
+//
+//   vw::Widget Card(vw::Ui& ui, const CardProps& props, const facet::Children& children) {
+//     const vw::Widget back = ui.rectangle({…});   // drawn first: behind
+//     for (const vw::Widget& child : children(ui)) …  // then the children
+//   }
+//
+// A component taking std::span<const vw::Widget> or std::vector<vw::Widget>
+// gets them built before its body runs, so they sit under whatever it draws.
+class Children {
+ public:
+  Children(std::function<std::vector<vw::Widget>(vw::Ui&)> build, vw::Ui& ui)
+      : build_(std::move(build)), ui_(&ui) {}
+
+  std::vector<vw::Widget> operator()(vw::Ui& ui) const { return build_(ui); }
+  std::vector<vw::Widget> operator()() const { return build_(*ui_); }
+  operator std::vector<vw::Widget>() const { return build_(*ui_); }
+  operator std::span<const vw::Widget>() const {
+    built_ = build_(*ui_);
+    return built_;
+  }
+
+ private:
+  std::function<std::vector<vw::Widget>(vw::Ui&)> build_;
+  vw::Ui* ui_;
+  mutable std::vector<vw::Widget> built_;
+};
+
 // A key for state that must follow one element: its place in the .facet
 // file plus the keys of the loops around it, e.g. "panel.facet:12:5|firefox".
 template <class... Keys>

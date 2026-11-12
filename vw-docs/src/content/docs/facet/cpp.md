@@ -58,7 +58,21 @@ S.Text(text: state.title, role: heading, tone: muted)
 S.Card(padding: normal) { … }
 ```
 
-`S.Text(…)` calls `JES::spectralium::Text(ui, TextProps)`; with children, they come as a third argument. In a component's props:
+`S.Text(…)` calls `JES::spectralium::Text(ui, TextProps)`. With children, a third argument carries them, built when the component asks: draw your background first, then call `children(ui)` so they land on top of it.
+
+```cpp
+vw::Widget Card(vw::Ui& ui, const CardProps& props, const facet::Children& children) {
+  const vw::Widget back = ui.rectangle({.width = props.width, .height = props.height, .radius = 16});
+  for (const vw::Widget& child : children(ui)) ui.move(child, 12, 12);  // inside the card
+  vw::Widget card = back;
+  card.end = ui.scene().rectangles.size();  // the card covers its children too
+  return card;
+}
+```
+
+A component may take `std::span<const vw::Widget>` or `std::vector<vw::Widget>` instead; then the children are built before its body runs, so they sit under anything it draws.
+
+In a component's props:
 
 - a bare name that is not a variable is an enum value of the field's type: `role: heading` is `decltype(props.role)::heading`
 - `"#rrggbb"` is a `vw::Color`, `"N%"` a relative size, an object sets fields one by one (`config: { refresh_rate: 1000 }`)
