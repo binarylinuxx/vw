@@ -1,11 +1,19 @@
 ---
 import Icon from './Icon.astro';
+import { t, type Locale } from '../data/i18n';
+
+interface Props { locale?: Locale }
+const { locale = 'en' } = Astro.props;
+const text = t(locale);
+// Plural forms for the client: the counts it shows most.
+const counts = Object.fromEntries([0, 1, 2, 3, 4, 5, 11, 21, 22].map((n) => [n, text.matches(n)]));
 ---
-<dialog id="search" class="search-dialog" aria-label="Search the documentation">
+<dialog id="search" class="search-dialog" aria-label={text.searchLabel} data-locale={locale}
+        data-start={text.startHere} data-failed={text.searchFailed} data-counts={JSON.stringify(counts)}>
   <div class="search-field">
     <Icon name="search" />
-    <input id="search-query" type="search" placeholder="Search widgets, services, guides…" autocomplete="off" enterkeyhint="go" />
-    <button class="icon-btn" type="button" data-search-close aria-label="Close search"><Icon name="close" /></button>
+    <input id="search-query" type="search" placeholder={text.searchPlaceholder} autocomplete="off" enterkeyhint="go" />
+    <button class="icon-btn" type="button" data-search-close aria-label={text.closeSearch}><Icon name="close" /></button>
   </div>
   <p class="search-status" id="search-status" role="status"></p>
   <div class="search-results" id="search-results" role="listbox"></div>
@@ -18,6 +26,16 @@ import Icon from './Icon.astro';
   const input = document.querySelector<HTMLInputElement>('#search-query')!;
   const results = document.querySelector<HTMLDivElement>('#search-results')!;
   const status = document.querySelector<HTMLParagraphElement>('#search-status')!;
+  const locale = dialog.dataset.locale === 'ru' ? 'ru' : 'en';
+  const counts: Record<string, string> = JSON.parse(dialog.dataset.counts || '{}');
+  // "3 matches", "3 совпадения": the plural of the nearest count shown above.
+  const matches = (count: number) => {
+    if (locale === 'en') return `${count} match${count === 1 ? '' : 'es'}`;
+    const tens = count % 100;
+    const ones = count % 10;
+    const like = tens >= 11 && tens <= 14 ? 11 : ones === 1 ? 21 : ones >= 2 && ones <= 4 ? 22 : 5;
+    return (counts[like] || '').replace(/^\d+/, String(count));
+  };
   let index: Promise<Entry[]> | undefined;
   let links: HTMLAnchorElement[] = [];
   let selected = 0;
@@ -30,7 +48,7 @@ import Icon from './Icon.astro';
 
   async function run() {
     try {
-      index ??= fetch(`${pageUrl('')}search-index.json`).then((r) => r.json());
+      index ??= fetch(`${pageUrl('', locale)}search-index.json`).then((r) => r.json());
       const entries = await index;
       const words = input.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
       const scored = entries
@@ -48,7 +66,7 @@ import Icon from './Icon.astro';
       links = scored.map(({ entry }, i) => {
         const a = document.createElement('a');
         a.className = 'search-result';
-        a.href = pageUrl(entry.slug);
+        a.href = pageUrl(entry.slug, locale);
         a.setAttribute('role', 'option');
         const s = document.createElement('small'); s.textContent = entry.section;
         const t = document.createElement('strong'); t.textContent = entry.title;
@@ -59,10 +77,10 @@ import Icon from './Icon.astro';
         return a;
       });
       select(0);
-      status.textContent = words.length ? `${scored.length} match${scored.length === 1 ? '' : 'es'}` : 'Good places to start';
+      status.textContent = words.length ? matches(scored.length) : dialog.dataset.start || '';
     } catch {
       index = undefined;
-      status.textContent = 'Search could not load.';
+      status.textContent = dialog.dataset.failed || '';
     }
   }
 

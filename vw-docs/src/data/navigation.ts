@@ -118,9 +118,11 @@ export function pagesIn(entries: Entry[]): Page[] {
 export const pagesOf = (tab: Tab) => tab.sections.flatMap((section) => pagesIn(section.items));
 export const allPages = tabs.flatMap(pagesOf);
 
-export function pageUrl(slug: string) {
+// A page's URL; Russian pages live under ru/.
+export function pageUrl(slug: string, locale: 'en' | 'ru' = 'en') {
   const base = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
-  return slug ? `${base}${slug}/` : base;
+  const root = locale === 'ru' ? `${base}ru/` : base;
+  return slug ? `${root}${slug}/` : root;
 }
 
 // The tab a page belongs to; the home page belongs to vw.

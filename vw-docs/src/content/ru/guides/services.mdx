@@ -1,0 +1,42 @@
+---
+title: Сервисы и события
+description: Каждый системный сервис — это фоновый поток с кэшированным снимком состояния и fd событий. Зарегистрируйте fd один раз, и поверхности будут пересобираться только при изменениях.
+---
+import { Callout } from '../../../components/index.ts';
+
+```cpp
+vw::App app;
+app.surface(bar).surface(sidebar);
+app.on_event(vw::network::event_fd(), vw::network::drain_events)
+   .on_event(vw::bluetooth::event_fd(), vw::bluetooth::drain_events)
+   .on_event(vw::upower::event_fd(), vw::upower::drain_events)
+   .on_event(vw::pipewire::event_fd(), vw::pipewire::drain_events)
+   .on_event(vw::mpris::event_fd(), vw::mpris::drain_events)
+   .on_event(vw::notifications::event_fd(), vw::notifications::drain_events);
+```
+
+## Схема
+
+Каждый сервис работает в своём потоке: главный цикл GLib для сервисов D-Bus (NetworkManager, BlueZ, UPower, MPRIS, трей, уведомления), собственный цикл PipeWire, inotify для подсветки, сокеты для композиторов. Когда его состояние меняется, он обновляет снимок и делает свой fd событий читаемым.
+
+- **Чтение дешёвое.** `vw::network::status()`, `vw::mpris::active()`, `vw::upower::display_device()` возвращают кэшированный снимок; они никогда не блокируются на шине. Вызывайте их из функций сборки сколько угодно.
+- **Запись — это вызовы.** `set_wifi_enabled`, `set_volume`, `play_pause`, `set_powered` обращаются к сервису и возвращают, получилось ли; само изменение приходит обратно событием.
+- **События объединяются.** `drain_events()` опустошает fd и возвращает `true`, если что-то произошло; после этого приложение один раз пересобирает все поверхности.
+
+Ваши собственные источники подключаются так же: любой fd плюс функция, которая его опустошает и говорит, нужна ли пересборка, — signalfd, inotify, timerfd.
+
+```cpp
+app.on_event(signal_fd, [] { /* прочитать siginfo */ return true; });
+```
+
+<Callout type="note">
+Отрицательный fd (сервиса нет в этой системе) игнорируется, так что регистрировать всё без условий — нормально.
+</Callout>
+
+## Куда дальше
+
+- [Уведомления](/ru/services/notifications/) — vw сам является демоном.
+- [Медиа и звук](/ru/services/media/) — плееры MPRIS и узлы PipeWire.
+- [Сеть, Bluetooth, питание](/ru/services/system/) — NetworkManager, BlueZ, UPower, подсветка.
+- [Приложения и трей](/ru/services/desktop/) — desktop-файлы и StatusNotifierItem.
+- [Композитор](/ru/compositor/overview/) — zwwm и Hyprland, на своей вкладке.

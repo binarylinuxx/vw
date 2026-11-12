@@ -1,0 +1,54 @@
+---
+title: Примеры
+description: Небольшие законченные программы в examples/cpp — каждая в одном файле, который можно прочитать сверху вниз и взять за основу.
+---
+import { Example } from '../../components/index.ts';
+
+Каждый пример — один файл C++, который собирается вместе с vw (`-DVW_BUILD_EXAMPLES=ON`, по умолчанию) и запускается сам по себе. Каждый достаточно короткий, чтобы скопировать его в свой проект и переделать.
+
+```sh
+cmake -S . -B build -G Ninja && cmake --build build
+./build/vw-example-clock
+```
+
+## Виджеты рабочего стола
+
+<Example name="clock" title="Часы" shows={['Layer::bottom', 'click-through', 'refresh_interval']}>
+  Приветствие, время и дата на полупрозрачной карточке в левом верхнем углу. Лежит под окнами, никогда не принимает ввод и пересобирается раз в секунду.
+</Example>
+
+<Example name="dock" title="Док" shows={['vw::applications', 'themed icons', 'Hover']}>
+  Закреплённые приложения вдоль нижнего края. Иконки берутся из desktop-файлов и темы иконок, клик запускает приложение.
+</Example>
+
+<Example name="calendar" title="Календарь" shows={['std::chrono', 'on_scroll', 'grid layout']}>
+  Сетка месяца в правом верхнем углу. Стрелки или колёсико мыши листают месяцы, сегодняшний день подсвечен.
+</Example>
+
+<Example name="bar" title="Панель" shows={['full-width surface', 'exclusive_zone', 'Hyprland events']}>
+  Верхняя панель во всю ширину: активное рабочее пространство, часы и кнопка лаунчера. Пересобирается сразу по событиям Hyprland.
+</Example>
+
+<Example name="status" title="Строка состояния" shows={['tray', 'network', 'bluetooth', 'upower', 'brightness']}>
+  Системные сервисы в одной панели. Иконки трея открывают меню во всплывающем окне, яркость меняется прокруткой, а чип переключает профиль питания.
+</Example>
+
+## Оверлеи
+
+<Example name="launcher" title="Лаунчер" shows={['two surfaces', 'Keyboard::exclusive', 'listview']}>
+  Панель со всплывающим лаунчером, обе в одном приложении. Попап появляется при открытии, забирает клавиатуру и фильтрует приложения по мере набора.
+</Example>
+
+<Example name="power" title="Меню питания" shows={['fill the output', 'Layer::overlay', 'keyboard']}>
+  Блокировка, выход, перезагрузка или выключение с затемнённого полноэкранного оверлея. Стрелки двигают выделение, Escape или клик мимо закрывают его.
+</Example>
+
+<Example name="calculator" title="Калькулятор" shows={['anchor::center', 'Keyboard::exclusive', 'grid layout']}>
+  Калькулятор фиксированного размера посреди экрана — тайлинг его не растянет. Мышью или с клавиатуры: цифры, операторы, Enter, Backspace и Escape.
+</Example>
+
+## Окно
+
+<Example name="tasks" title="Задачи" shows={['Ui::toplevel', 'text_field', 'listview', 'persistence']}>
+  Список дел в обычном окне с изменяемым размером. Добавляйте задачи по Enter, потом фильтруйте, отмечайте и удаляйте. Они сохраняются в `$XDG_DATA_HOME`.
+</Example>

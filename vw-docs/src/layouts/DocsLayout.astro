@@ -4,6 +4,7 @@ import Icon from '../components/Icon.astro';
 import Shape from '../components/Shape.astro';
 import NavTree from '../components/NavTree.astro';
 import { tabs, tabOf, pagesOf, pageUrl, trailOf } from '../data/navigation';
+import { label, t, type Locale } from '../data/i18n';
 import '../styles/docs.css';
 
 interface Props {
@@ -12,10 +13,19 @@ interface Props {
   slug: string;
   headings?: { depth: number; slug: string; text: string }[];
   home?: boolean;
+  locale?: Locale;
+  // A Russian page showing the English text, for want of a translation.
+  untranslated?: boolean;
 }
-const { title, description, slug, headings = [], home = false } = Astro.props;
+const { title, description, slug, headings = [], home = false, locale = 'en', untranslated = false } = Astro.props;
+const text = t(locale);
+const other: Locale = locale === 'ru' ? 'en' : 'ru';
+// The same page in the other language; the 404 page links to the other home.
+const otherUrl = pageUrl(slug === '404' ? '' : slug, other);
+const url = (page: string) => pageUrl(page, locale);
 const tab = tabOf(slug);
-const trail = trailOf(slug);
+const trail = trailOf(slug).map((item) => label(item, locale));
+const tabLabel = label(tab.label, locale);
 // Previous and next stay within the tab.
 const pages = pagesOf(tab);
 const position = pages.findIndex((page) => page.slug === slug);
@@ -25,14 +35,15 @@ const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
 const canonical = Astro.site ? new URL(Astro.url.pathname, Astro.site) : undefined;
 ---
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang={locale} data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>{home ? 'vw — widgets for Wayland, drawn on the GPU' : `${title} — vw`}</title>
+    <title>{home ? text.homeTitle : `${title} — vw`}</title>
     <meta name="description" content={description} />
     <meta name="theme-color" content="#0c1014" />
     {canonical && <link rel="canonical" href={canonical} />}
+    {slug !== '404' && Astro.site && <link rel="alternate" hreflang={other} href={new URL(otherUrl, Astro.site)} />}
     <link rel="icon" href={`${import.meta.env.BASE_URL}favicon.svg`} type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -45,65 +56,67 @@ const canonical = Astro.site ? new URL(Astro.url.pathname, Astro.site) : undefin
     </script>
   </head>
   <body>
-    <a class="skip" href="#content">Skip to content</a>
+    <a class="skip" href="#content">{text.skip}</a>
 
     <header class="topbar">
-      <a class="brand" href={pageUrl('')} aria-label="vw home">
+      <a class="brand" href={url('')} aria-label={text.home}>
         <Shape class="brand-shape" lobes={7} depth={0.09} />
         <span class="brand-name">vw</span>
       </a>
-      <span class="topbar-crumb">{home ? 'Wayland × Vulkan' : [tab.label, ...trail].join(' › ')}</span>
+      <span class="topbar-crumb">{home ? 'Wayland × Vulkan' : [tabLabel, ...trail].join(' › ')}</span>
     </header>
 
     <div class:list={['frame', { 'is-home': home }]}>
-      <aside class="drawer" id="drawer" aria-label="Documentation">
+      <aside class="drawer" id="drawer" aria-label={text.documentation}>
         <div class="drawer-head">
-          <a class="brand" href={pageUrl('')} aria-label="vw home">
+          <a class="brand" href={url('')} aria-label={text.home}>
             <Shape class="brand-shape" lobes={7} depth={0.09} />
-            <span><span class="brand-name">vw</span><span class="brand-sub">Wayland widgets on Vulkan</span></span>
+            <span><span class="brand-name">vw</span><span class="brand-sub">{text.tagline}</span></span>
           </a>
         </div>
-        <nav class="tabs" aria-label="Documentation sets">
+        <nav class="tabs" aria-label={text.sets}>
           {tabs.map((item) => (
-            <a href={pageUrl(item.home)} aria-current={item.id === tab.id ? 'true' : undefined}>
-              <Icon name={item.icon} /><span>{item.label}</span>
+            <a href={url(item.home)} aria-current={item.id === tab.id ? 'true' : undefined}>
+              <Icon name={item.icon} /><span>{label(item.label, locale)}</span>
             </a>
           ))}
         </nav>
         <button class="search-pill" type="button" data-search-open>
-          <Icon name="search" /><span>Search</span><kbd>Ctrl K</kbd>
+          <Icon name="search" /><span>{text.search}</span><kbd>Ctrl K</kbd>
         </button>
-        <nav class="nav" aria-label={`${tab.label} pages`}>
+        <nav class="nav" aria-label={text.pages(tabLabel)}>
           {tab.sections.map((group) => (
             <div class="nav-section">
-              <p class="nav-title"><Icon name={group.icon} />{group.label}</p>
-              <NavTree items={group.items} slug={slug} />
+              <p class="nav-title"><Icon name={group.icon} />{label(group.label, locale)}</p>
+              <NavTree items={group.items} slug={slug} locale={locale} />
             </div>
           ))}
         </nav>
         <div class="drawer-foot">
           <span>libvw 0.1 · C++23 · Facet · Lua</span>
-          <button class="icon-btn theme-btn" type="button" data-theme-toggle aria-label="Switch light or dark">
+          <a class="lang-btn" href={otherUrl} hreflang={other} lang={other} aria-label={text.languageLabel}>{other.toUpperCase()}</a>
+          <button class="icon-btn theme-btn" type="button" data-theme-toggle aria-label={text.theme}>
             <Icon name="sun" class="sun" /><Icon name="moon" class="moon" />
           </button>
         </div>
       </aside>
-      <button class="scrim" type="button" data-nav-close aria-label="Close menu" tabindex="-1"></button>
+      <button class="scrim" type="button" data-nav-close aria-label={text.closeMenu} tabindex="-1"></button>
 
       <main class="sheet" id="content">
         {home ? <slot /> : (
           <>
             <div class="crumb">
-              <span class="chip">{tab.label}</span>
-              {trail.map((label) => <span class="chip tonal">{label}</span>)}
+              <span class="chip">{tabLabel}</span>
+              {trail.map((item) => <span class="chip tonal">{item}</span>)}
             </div>
             <h1 class="page-title">{title}</h1>
             {description && <p class="page-lede">{description}</p>}
-            <article class="prose"><slot /></article>
+            {untranslated && <p class="untranslated" lang={locale}>{text.untranslated}</p>}
+            <article class="prose" lang={untranslated ? 'en' : locale}><slot /></article>
             {(previous || next) && (
-              <nav class="pager" aria-label="Previous and next">
-                {previous && <a href={pageUrl(previous.slug)}><small>Previous</small><strong>{previous.label}</strong></a>}
-                {next && <a class="next" href={pageUrl(next.slug)}><small>Next</small><strong>{next.label}</strong></a>}
+              <nav class="pager" aria-label={text.previousNext}>
+                {previous && <a href={url(previous.slug)}><small>{text.previous}</small><strong>{label(previous.label, locale)}</strong></a>}
+                {next && <a class="next" href={url(next.slug)}><small>{text.next}</small><strong>{label(next.label, locale)}</strong></a>}
               </nav>
             )}
           </>
@@ -111,10 +124,10 @@ const canonical = Astro.site ? new URL(Astro.url.pathname, Astro.site) : undefin
       </main>
 
       {!home && (
-        <aside class="toc-rail" aria-label="On this page">
+        <aside class="toc-rail" aria-label={text.onThisPage}>
           {toc.length > 0 && (
             <nav class="toc">
-              <h2>On this page</h2>
+              <h2>{text.onThisPage}</h2>
               <ul>{toc.map((h) => <li><a class={`depth-${h.depth}`} href={`#${h.slug}`} data-toc>{h.text}</a></li>)}</ul>
             </nav>
           )}
@@ -122,13 +135,14 @@ const canonical = Astro.site ? new URL(Astro.url.pathname, Astro.site) : undefin
       )}
     </div>
 
-    <nav class="bottombar" aria-label="Quick actions">
-      <button type="button" class="primary" data-nav-open aria-controls="drawer"><Icon name="menu" />Index</button>
-      <button type="button" data-search-open aria-label="Search"><Icon name="search" /></button>
-      <button type="button" class="theme-btn" data-theme-toggle aria-label="Switch light or dark"><Icon name="sun" class="sun" /><Icon name="moon" class="moon" /></button>
+    <nav class="bottombar" aria-label={text.quickActions}>
+      <button type="button" class="primary" data-nav-open aria-controls="drawer"><Icon name="menu" />{text.index}</button>
+      <button type="button" data-search-open aria-label={text.search}><Icon name="search" /></button>
+      <a class="lang-btn" href={otherUrl} hreflang={other} lang={other} aria-label={text.languageLabel}>{other.toUpperCase()}</a>
+      <button type="button" class="theme-btn" data-theme-toggle aria-label={text.theme}><Icon name="sun" class="sun" /><Icon name="moon" class="moon" /></button>
     </nav>
 
-    <Search />
+    <Search locale={locale} />
 
     <script>
       const root = document.documentElement;

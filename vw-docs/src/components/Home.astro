@@ -1,0 +1,227 @@
+---
+import { Code } from 'astro:components';
+import Shape from '../components/Shape.astro';
+import Icon from '../components/Icon.astro';
+import { pageUrl } from '../data/navigation';
+import type { Locale } from '../data/i18n';
+
+interface Props { locale?: Locale }
+const { locale = 'en' } = Astro.props;
+const ru = locale === 'ru';
+const url = (slug: string) => pageUrl(slug, locale);
+
+const example = `#include <vw/vw.hpp>
+
+int main() {
+  vw::App app([](vw::Ui& ui) {
+    const bool playing = vw::mpris::available();
+    ui.rectangle({.width = 220, .height = 56, .radius = 28,
+                  .color = vw::rgb(0x263b4d)});
+    ui.text({.text = playing ? "Now playing" : "Quiet",
+             .font = "Roboto Flex", .size = 17,
+             .color = vw::rgb(0xd2e5ff),
+             .place = {.x = 24, .y = 17}});
+    ui.surface({.anchor = vw::anchor::top, .margin = {12, 0, 0, 0}});
+  });
+  app.on_event(vw::mpris::event_fd(), vw::mpris::drain_events);
+  return app.run();
+}`;
+
+const steps = ru ? [
+  ['Сборка', 'Ваша функция описывает всю поверхность через Ui, каждый раз с нуля.'],
+  ['Сцена', 'Прямоугольники, текст, картинки и области ввода — и сравнение с прошлой сценой.'],
+  ['Вычисление', 'Compute-шейдеры Vulkan растеризуют её, со скруглёнными углами, в порядке сцены.'],
+  ['Показ', 'Линейный dma-buf уходит композитору как layer-поверхность, окно или экран блокировки.'],
+] : [
+  ['Build', 'Your function describes the whole surface through a Ui, from scratch.'],
+  ['Scene', 'Rectangles, shaped text, images and input regions, compared to the last one.'],
+  ['Compute', 'Vulkan compute shaders rasterise it, rounded corners and all, in scene order.'],
+  ['Present', 'A linear dma-buf goes to the compositor as a layer surface, window or lock.'],
+];
+
+const modules = [
+  { group: ru ? 'Рисование' : 'Draw', items: ['rectangle', 'text', 'image', 'canvas', 'text_field'], href: 'reference/widgets' },
+  { group: ru ? 'Раскладка' : 'Arrange', items: ['row', 'column', 'stack', 'anchor_layout', 'listview'], href: 'reference/layout' },
+  { group: ru ? 'Движение' : 'Move', items: ['animate', 'springs', 'Bézier', 'drag', 'hover'], href: 'reference/animation' },
+  { group: ru ? 'Рабочий стол' : 'Desktop', items: ['notifications', 'tray', 'applications'], href: 'services/notifications' },
+  { group: ru ? 'Медиа' : 'Media', items: ['mpris', 'pipewire'], href: 'services/media' },
+  { group: ru ? 'Система' : 'System', items: ['network', 'bluetooth', 'upower', 'brightness'], href: 'services/system' },
+  { group: ru ? 'Композитор' : 'Compositor', items: ['zwwm', 'hyprland', 'capture'], href: 'compositor/overview' },
+  { group: ru ? 'Скрипты' : 'Script', items: [ru ? 'конфиги Lua' : 'Lua configs', ru ? 'горячая перезагрузка' : 'hot reload', 'QuickJS canvas'], href: 'lua/overview' },
+];
+---
+
+  <section class="hero">
+    <div class="hero-copy">
+      <p class="eyebrow"><span class="dot"></span>libvw · Wayland × Vulkan</p>
+      {ru ? <h1>Ваш рабочий стол, <em>нарисованный</em> на GPU.</h1> : <h1>Your desktop, <em>drawn</em> on the GPU.</h1>}
+      <p class="hero-lede">{ru
+        ? 'vw строит панели, доки, центры уведомлений, лаунчеры, экраны блокировки и обычные окна. Описывайте поверхность на C++ или Lua в каждом кадре; vw хранит состояние, анимирует его и рисует через compute-шейдеры Vulkan.'
+        : 'vw builds bars, docks, notification centres, launchers, lock screens and ordinary windows. Describe a surface in C++ or Lua every frame; vw keeps state, animates it, and renders it with Vulkan compute.'}</p>
+      <div class="hero-actions">
+        <a class="btn filled" href={url('start/first-surface')}>{ru ? 'Создать поверхность' : 'Build a surface'} <Icon name="arrow" /></a>
+        <a class="btn tonal" href={url('examples')}>{ru ? 'Примеры' : 'See examples'}</a>
+      </div>
+    </div>
+    <div class="hero-art" aria-hidden="true">
+      <Shape class="s1" lobes={9} depth={0.07} />
+      <Shape class="s2" lobes={4} depth={0.16} rotation={0.4} />
+      <Shape class="s3" lobes={12} depth={0.05} />
+      <div class="pill-demo">
+        <span class="pill-dot"></span>
+        <span>Now playing</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <header class="band-head">
+      <h2>{ru ? 'Одна функция на поверхность' : 'One function per surface'}</h2>
+      <p>{ru ? 'Никакого дерева виджетов, которое надо синхронизировать. Функция сборки запускается заново после ввода, событий и по своему интервалу обновления; всё, что должно пережить пересборку, — прокрутка, текстовые поля, анимации — хранится по id.' : 'No widget tree to keep in sync. The build function runs again after input, events and on its refresh interval; anything that must survive — scroll offsets, text fields, tweens — is keyed by id.'}</p>
+    </header>
+    <div class="specimen">
+      <div class="specimen-code"><Code code={example} lang="cpp" themes={{ light: 'github-light', dark: 'github-dark-dimmed' }} defaultColor={false} /></div>
+      <div class="specimen-out">
+        <span class="label">{ru ? 'Рисует' : 'Draws'}</span>
+        <div class="screen">
+          <div class="screen-bar"></div>
+          <div class="pill-demo big"><span class="pill-dot"></span><span>Now playing</span></div>
+        </div>
+        <p>{ru ? 'Layer-поверхность у верхнего края, которая пересобирается при каждом изменении в медиаплеере.' : 'A layer surface anchored to the top edge, rebuilt whenever a media player changes.'}</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <header class="band-head">
+      <h2>{ru ? 'Как получается кадр' : 'How a frame happens'}</h2>
+    </header>
+    <ol class="pipeline">
+      {steps.map(([name, text], i) => (
+        <li style={`--i:${i}`}>
+          <span class="step-shape"><Shape lobes={[6, 8, 10, 5][i]} depth={0.1} /><b>{i + 1}</b></span>
+          <strong>{name}</strong>
+          <p>{text}</p>
+        </li>
+      ))}
+    </ol>
+  </section>
+
+  <section class="band">
+    <header class="band-head">
+      <h2>{ru ? 'Что внутри' : "What's in the box"}</h2>
+      <p>{ru ? 'Виджеты, раскладка и движение, плюс сервисы, нужные оболочке, — каждый из них источник событий, которого может ждать цикл.' : 'Widgets, layout and motion, plus the services a shell needs — each one an event source the loop can wait on.'}</p>
+    </header>
+    <div class="modules">
+      {modules.map((m) => (
+        <a class="module" href={url(m.href)}>
+          <strong>{m.group}</strong>
+          <span class="tags">{m.items.map((t) => <code>{t}</code>)}</span>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="band ways">
+    <a class="way" href={url('start/installation')}><small>01</small><strong>{ru ? 'Установка' : 'Install'}</strong><span>{ru ? 'Nix dev shell, CMake, clang.' : 'Nix dev shell, CMake, clang.'}</span></a>
+    <a class="way" href={url('guides/shells')}><small>02</small><strong>{ru ? 'Своя оболочка' : 'Build a shell'}</strong><span>{ru ? 'Layer-поверхности, exclusive zone, прозрачность для кликов.' : 'Layer surfaces, exclusive zones, click-through.'}</span></a>
+    <a class="way" href={url('lua/overview')}><small>03</small><strong>{ru ? 'Скрипты на Lua' : 'Script it in Lua'}</strong><span>{ru ? 'Конфиги с горячей перезагрузкой, те же виджеты.' : 'Hot-reloading configs, same widgets.'}</span></a>
+  </section>
+
+<style is:global>
+  /* Global: the shapes and icons live inside child components. Only this page loads it. */
+  .hero {
+    position: relative; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+    gap: 24px; align-items: center; min-height: min(70vh, 640px); padding-bottom: 24px;
+  }
+  .eyebrow { display: inline-flex; align-items: center; gap: 10px; margin: 0 0 22px; padding: 8px 16px;
+    border-radius: 999px; background: var(--surface-2); color: var(--on-surface-variant); font-size: 14px; font-weight: 550; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tertiary); box-shadow: 0 0 0 4px color-mix(in srgb, var(--tertiary) 25%, transparent); }
+  h1 { margin: 0; font-size: clamp(48px, 8.4vw, 104px); line-height: 0.94; font-weight: 820; font-stretch: 116%; letter-spacing: -0.045em; }
+  h1 em { font-style: normal; font-weight: 300; font-stretch: 80%; color: var(--primary); }
+  .hero-lede { margin: 26px 0 30px; max-width: 54ch; font-size: clamp(17px, 1.6vw, 20px); color: var(--on-surface-variant); }
+  .hero-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; height: 56px; padding: 0 26px; border-radius: 999px;
+    font-weight: 650; font-size: 16px; text-decoration: none; transition: border-radius 0.35s var(--spring), transform 0.2s var(--ease); }
+  .btn:hover { border-radius: 18px; }
+  .btn:active { transform: scale(0.97); }
+  .btn svg { width: 20px; height: 20px; }
+  .btn.filled { background: var(--primary); color: var(--on-primary); }
+  .btn.tonal { background: var(--secondary-container); color: var(--on-secondary-container); }
+
+  .hero-art { position: relative; aspect-ratio: 1; max-height: 520px; }
+  .hero-art svg { position: absolute; }
+  .s1 { inset: 6% 8% 14% 4%; color: var(--primary-container); animation: spin 60s linear infinite; }
+  .s2 { width: 38%; right: 0; top: 2%; color: var(--secondary); animation: spin 26s linear infinite reverse; }
+  .s3 { width: 30%; left: 2%; bottom: 4%; color: var(--tertiary-container); animation: spin 40s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .hero-art .pill-demo { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+
+  .pill-demo { display: inline-flex; align-items: center; gap: 12px; height: 56px; padding: 0 26px 0 20px; border-radius: 28px;
+    background: #263b4d; color: #d2e5ff; font-weight: 600; font-size: 17px; white-space: nowrap; box-shadow: var(--shadow); }
+  .pill-dot { width: 12px; height: 12px; border-radius: 4px; background: #9de2c0; animation: pulse 1.6s var(--ease) infinite alternate; }
+  @keyframes pulse { to { transform: rotate(45deg) scale(0.8); border-radius: 50%; } }
+
+  .band { margin-top: clamp(48px, 8vw, 96px); }
+  .band-head { max-width: 62ch; margin-bottom: 24px; }
+  .band-head h2 { margin: 0 0 8px; font-size: clamp(28px, 4vw, 40px); line-height: 1.05; font-weight: 760; font-stretch: 108%; letter-spacing: -0.03em; }
+  .band-head p { margin: 0; color: var(--on-surface-variant); font-size: 17px; }
+
+  .specimen { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 12px; }
+  .specimen > * { min-width: 0; }
+  .specimen-code pre { margin: 0; height: 100%; padding: 22px; border-radius: 28px; background: var(--code-bg) !important;
+    border: 1px solid var(--outline-variant); font: 13px/1.7 var(--mono); overflow-x: auto; }
+  .specimen-out { display: flex; flex-direction: column; gap: 14px; padding: 22px; border-radius: 28px; background: var(--surface-1); }
+  .specimen-out p { margin: 0; color: var(--on-surface-variant); font-size: 15px; }
+  .label { font-size: 12px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--secondary); }
+  .screen { position: relative; flex: 1; min-height: 220px; border-radius: 20px; overflow: hidden;
+    background: radial-gradient(120% 90% at 20% 110%, #c1554e 0%, transparent 55%), radial-gradient(90% 80% at 100% 0%, #2b6a8a 0%, transparent 60%), #10202c; }
+  .screen-bar { position: absolute; inset: 0 0 auto 0; height: 8px; background: rgb(0 0 0 / 0.35); }
+  .screen .pill-demo { position: absolute; left: 50%; top: 22px; transform: translateX(-50%); }
+
+  .pipeline { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .pipeline li { position: relative; padding: 22px; border-radius: 28px; background: var(--surface-1); }
+  .pipeline li:not(:last-child)::after { content: ''; position: absolute; right: -12px; top: 50px; width: 12px; height: 4px; background: var(--outline-variant); }
+  .step-shape { position: relative; display: grid; place-items: center; width: 56px; height: 56px; margin-bottom: 14px; color: var(--tertiary-container); }
+  .step-shape svg { position: absolute; inset: 0; }
+  .step-shape b { position: relative; color: var(--on-tertiary-container); font-size: 18px; }
+  .pipeline li:nth-child(2) .step-shape { color: var(--primary-container); } .pipeline li:nth-child(2) b { color: var(--on-primary-container); }
+  .pipeline li:nth-child(3) .step-shape { color: var(--secondary-container); } .pipeline li:nth-child(3) b { color: var(--on-secondary-container); }
+  .pipeline strong { display: block; font-size: 19px; font-weight: 700; margin-bottom: 4px; }
+  .pipeline p { margin: 0; color: var(--on-surface-variant); font-size: 15px; }
+
+  .modules { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .module { display: flex; flex-direction: column; gap: 12px; padding: 18px 20px; border-radius: 24px; background: var(--surface-low);
+    color: var(--on-surface); text-decoration: none; transition: background 0.2s var(--ease), border-radius 0.35s var(--spring); }
+  .module:hover { background: var(--surface-2); border-radius: 16px; }
+  .module strong { font-size: 18px; font-weight: 700; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tags code { font: 500 12.5px var(--mono); padding: 4px 9px; border-radius: 8px; background: var(--surface-3); color: var(--on-surface-variant); }
+
+  .ways { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 8px; }
+  .way { display: flex; flex-direction: column; gap: 4px; padding: 24px; border-radius: 28px; background: var(--primary-container);
+    color: var(--on-primary-container); text-decoration: none; transition: border-radius 0.35s var(--spring); }
+  .way:nth-child(2) { background: var(--secondary-container); color: var(--on-secondary-container); }
+  .way:nth-child(3) { background: var(--tertiary-container); color: var(--on-tertiary-container); }
+  .way:hover { border-radius: 18px; }
+  .way small { font: 600 13px var(--mono); opacity: 0.75; }
+  .way strong { font-size: 24px; font-weight: 750; letter-spacing: -0.02em; }
+  .way span { opacity: 0.85; }
+
+  @media (max-width: 1100px) {
+    .modules { grid-template-columns: repeat(2, 1fr); }
+    .pipeline { grid-template-columns: repeat(2, 1fr); }
+    .pipeline li:nth-child(2)::after { display: none; }
+  }
+  @media (max-width: 880px) {
+    .hero { grid-template-columns: 1fr; min-height: 0; }
+    .hero-art { order: -1; max-width: 300px; width: 70%; margin: -8px auto 8px; }
+    .specimen, .ways { grid-template-columns: 1fr; }
+    .specimen-code pre { font-size: 12px; padding: 16px; }
+  }
+  @media (max-width: 560px) {
+    .pipeline, .modules { grid-template-columns: 1fr; }
+    .pipeline li::after { display: none; }
+    .btn { flex: 1; justify-content: center; }
+  }
+</style>

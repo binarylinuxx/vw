@@ -3,19 +3,20 @@
 // current page; folders nest by rendering this component again.
 import Icon from './Icon.astro';
 import { isGroup, pageUrl, pagesIn, type Entry } from '../data/navigation';
+import { label, type Locale } from '../data/i18n';
 
-interface Props { items: Entry[]; slug: string; depth?: number }
-const { items, slug, depth = 0 } = Astro.props;
+interface Props { items: Entry[]; slug: string; depth?: number; locale?: Locale }
+const { items, slug, depth = 0, locale = 'en' } = Astro.props;
 ---
 <ul class:list={['nav-list', { 'nav-nested': depth > 0 }]}>
   {items.map((entry) => isGroup(entry) ? (
     <li>
       <details class="nav-group" open={pagesIn(entry.items).some((page) => page.slug === slug)}>
-        <summary><Icon name="chevron" class="nav-chevron" /><span>{entry.label}</span></summary>
-        <Astro.self items={entry.items} slug={slug} depth={depth + 1} />
+        <summary><Icon name="chevron" class="nav-chevron" /><span>{label(entry.label, locale)}</span></summary>
+        <Astro.self items={entry.items} slug={slug} depth={depth + 1} locale={locale} />
       </details>
     </li>
   ) : (
-    <li><a href={pageUrl(entry.slug)} aria-current={entry.slug === slug ? 'page' : undefined}>{entry.label}</a></li>
+    <li><a href={pageUrl(entry.slug, locale)} aria-current={entry.slug === slug ? 'page' : undefined}>{label(entry.label, locale)}</a></li>
   ))}
 </ul>

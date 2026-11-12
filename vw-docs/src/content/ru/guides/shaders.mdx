@@ -1,0 +1,88 @@
+---
+title: Свои шейдеры
+description: Любой прямоугольник можно нарисовать собственным compute-шейдером. vw компилирует его в .vws — SPIR-V плюс то, что vw нужно знать, — и платит только за то, что шейдер объявил.
+---
+import { Callout } from '../../../components/index.ts';
+
+## Пишем шейдер
+
+```glsl
+#version 450
+// @vw name: Frosted tint
+// @vw params: strength
+#define VW_USE_BACKDROP          // этот шейдер читает то, что нарисовано до него
+#include <vw/shader.glsl>
+
+void main() {
+  ivec2 pixel; vec2 local;
+  if (!vw_begin(pixel, local)) return;   // вне прямоугольника, поверхности или обрезки
+  float d = vw_rounded_box(local - vw_size() * 0.5, vw_size() * 0.5, vw_radius());
+  vec4 behind = vw_backdrop(pixel);
+  vw_blend(pixel, vw_premultiply(mix(behind, vw.color, vw_param(0)), vw_coverage(d)));
+}
+```
+
+`vw/shader.glsl` объявляет интерфейс vw и несколько помощников, так что в шейдере остаётся только его собственная идея.
+
+## Компиляция
+
+```sh
+vw-shaderc tint.comp -o tint.vws
+vw-shaderc --inspect tint.vws
+```
+
+`vw-shaderc` запускает `glslc` (из `$VW_GLSLC` или `PATH`), проверяет модуль на соответствие контракту vw — точка входа `main`, рабочие группы 8×8×1, только привязки 0–2 набора 0 — и пишет файл `.vws`. Ошибки сообщаются при сборке, а не пустым прямоугольником во время работы.
+
+В CMake установленный пакет даёт функцию, которая отслеживает `#include`:
+
+```cmake
+find_package(vw REQUIRED)
+vw_compile_shader(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tint.vws SOURCE shaders/tint.comp)
+add_custom_target(shaders ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/tint.vws)
+```
+
+## Использование
+
+```cpp
+ui.rectangle({.width = 420, .height = 220, .radius = 32, .color = vw::rgba(0x1b2732c0),
+              .shader = "/path/to/tint.vws", .shader_params = {0.4f}});
+```
+
+Конвейер кэшируется по пути и времени изменения: перекомпилируйте, пока программа работает, и следующий кадр возьмёт новый шейдер. Обычные файлы `.spv` тоже загружаются, но тогда vw приходится предполагать, что они читают всё.
+
+## Формат .vws
+
+Файл `.vws` в little-endian:
+
+| Байты | Поле |
+| --- | --- |
+| 4 | сигнатура `VWS1` |
+| 2 | версия формата (1) |
+| 2 | флаги: бит 0 — читает фон, бит 1 — читает `shader_data` |
+| 4 | длина SPIR-V в словах |
+| 4 | CRC-32 от SPIR-V |
+| 1 + n | имя |
+| 1 + … | число параметров (≤ 4), затем каждое имя как 1 + n байт |
+| 0–3 | выравнивание до 4 байт |
+| 4 × слов | SPIR-V |
+
+Флаги выводятся из привязок, которые объявляет скомпилированный модуль, и никогда не пишутся руками. Контрольная сумма ловит обрезанные или испорченные файлы с понятной ошибкой. Собственные шейдеры vw компилируются так же и встроены в библиотеку, так что во время работы ничего не ищется; `VW_SHADER_DIR` может указывать на более новые `rounded_rect.vws`/`raster.vws`, пока вы над ними работаете.
+
+## Что даёт vw
+
+| Имя | Что это |
+| --- | --- |
+| `vw_target` | привязка 0, поверхность (`rgba8`, premultiplied) |
+| `vw.bounds`, `vw.params`, `vw.color`, `vw.color2`, `vw.border_color`, `vw.clip`, `vw.clip_params`, `vw.shader_params` | прямоугольник (push-константы) |
+| `vw_begin(out pixel, out local)` | пиксель этого вызова; false вне прямоугольника, поверхности или обрезки родителя |
+| `vw_size()`, `vw_radius()`, `vw_param(i)` | сокращения |
+| `vw_rounded_box(p, half, r)`, `vw_coverage(d)` | знаковое расстояние и сглаженное покрытие |
+| `vw_blend(pixel, premultiplied)`, `vw_premultiply(color, amount)` | композиция |
+| `vw_data(i)`, `vw_data_length()` | `shader_data`, с `VW_USE_DATA` |
+| `vw_backdrop(pixel)` | то, что нарисовано раньше, с `VW_USE_BACKDROP` |
+
+<Callout type="tip" title="Просите фон, только когда читаете его">
+Фон — это копия всей поверхности, сделанная прямо перед отрисовкой вашего прямоугольника. Без `VW_USE_BACKDROP` шейдер его не объявляет, `.vws` об этом знает, и vw пропускает копирование — для оболочки, нарисованной одним большим шейдером, это экономия копии всей поверхности в каждом кадре.
+</Callout>
+
+Фон содержит всё, что нарисовано раньше на той же поверхности, — прямоугольники, текст и картинки в порядке сцены, — но никогда не рабочий стол и не другие окна: клиент не может заглянуть за себя.

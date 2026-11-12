@@ -1,0 +1,63 @@
+---
+title: Первая поверхность
+description: Часы, прикреплённые к верху экрана, потом интерактивные, потом реагирующие на сервис, — примерно в сорок строк C++.
+---
+import { Callout } from '../../../components/index.ts';
+
+## Поверхность — это функция
+
+```cpp
+#include <vw/vw.hpp>
+#include <chrono>
+#include <format>
+
+int main() {
+  vw::App app([](vw::Ui& ui) {
+    const auto now = std::chrono::zoned_time{std::chrono::current_zone(),
+                                             std::chrono::system_clock::now()};
+    ui.rectangle({.width = 160, .height = 48, .radius = 24, .color = vw::rgb(0x263b4d)});
+    ui.text({.text = std::format("{:%H:%M}", now), .font = "sans", .size = 18,
+             .weight = vw::weight::semibold, .color = vw::rgb(0xd2e5ff),
+             .place = {.x = 54, .y = 13}});
+    ui.surface({.anchor = vw::anchor::top, .margin = {10, 0, 0, 0}, .refresh_interval = 1});
+  });
+  return app.run();
+}
+```
+
+Слинкуйте с `vw::vw` и запустите под композитором Wayland с поддержкой layer-shell. Функция вызывается всякий раз, когда поверхности нужна новая сцена: здесь — раз в секунду из-за `refresh_interval` и при каждом вводе. Неизменившиеся сцены сравниваются и заново не рисуются, так что часы, у которых минута ещё не сменилась, стоят одной сборки, а не кадра.
+
+`ui.surface` делает из этого layer-поверхность: прикреплённую к верхнему краю, на 10 px ниже него. Без размера поверхность ровно такого размера, как нарисованное.
+
+## Реакция на действия
+
+Виджеты принимают блок `input`. Состояние, которое должно жить между сборками, живёт вне функции:
+
+```cpp
+bool expanded = false;
+vw::App app([&](vw::Ui& ui) {
+  const float width = static_cast<float>(vw::animate("pill.width", expanded ? 280 : 160,
+      {.duration = 0.4, .easing = vw::Easing::out_back}));
+  ui.rectangle({.width = width, .height = 48, .radius = 24, .color = vw::rgb(0x263b4d),
+                .input = {.on_click = [&](const vw::ClickEvent&) { expanded = !expanded; },
+                          .hover = vw::Hover{.color = vw::rgb(0x2f4a60)}}});
+  // ...
+});
+```
+
+`vw::animate` — это анимация (tween) по id: она возвращает, где значение находится сейчас, и запрашивает кадры, пока не дойдёт до цели. Кадры идут в темпе frame callback'ов композитора, так что анимация никогда не бежит быстрее экрана и перестаёт что-либо стоить, как только остановится.
+
+## Реакция на систему
+
+У каждого сервиса есть fd событий. Отдайте его приложению — и поверхность пересоберётся, когда он сработает:
+
+```cpp
+app.on_event(vw::pipewire::event_fd(), vw::pipewire::drain_events);
+// в функции сборки:
+if (const auto sink = vw::pipewire::default_sink())
+  ui.text({.text = std::format("{:.0f}%", sink->volume() * 100), /* ... */});
+```
+
+<Callout type="tip" title="Несколько поверхностей, один цикл">
+Вызывайте `app.surface(...)` для каждой поверхности: панель, лаунчер, который рисуется только когда открыт, экран блокировки. Сборка, которая ничего не нарисовала, оставляет поверхность скрытой — так попапы появляются и исчезают.
+</Callout>
