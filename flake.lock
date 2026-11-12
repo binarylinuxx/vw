@@ -25,11 +25,11 @@
     "zwwm": {
       "flake": false,
       "locked": {
-        "lastModified": 1792091994,
-        "narHash": "sha256-yqs/pcYWemRW+yyXLy539tTdn+R4LQ1Z64Ox1etnCFM=",
+        "lastModified": 1794411577,
+        "narHash": "sha256-xjXSiFMSIiTYOgA3yKkIw6ZIBDhZVUkS/Wg806dNTEA=",
         "owner": "zwwmWM",
         "repo": "zwwm",
-        "rev": "3876dd3681164452c4a9dfcecde5332ad3324697",
+        "rev": "80dbbf62da4ed368266049a52be32ed1ca053d14",
         "type": "github"
       },
       "original": {
