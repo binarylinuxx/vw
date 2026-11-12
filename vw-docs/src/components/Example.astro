@@ -2,13 +2,15 @@
 // One example: screenshot (public/examples/<name>.png), what it shows, and
 // how to run it. Missing screenshots render as a labelled placeholder.
 import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
 interface Props { name: string; title: string; shows?: string[] }
 const { name, title, shows = [] } = Astro.props;
 const base = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
 const image = `examples/${name}.png`;
-const hasImage = existsSync(fileURLToPath(new URL(`../../public/${image}`, import.meta.url)));
+// Builds run from the docs root. import.meta.url would point into the bundle
+// in a production build, where public/ is not next to it.
+const hasImage = existsSync(join(process.cwd(), 'public', image));
 ---
 <article class="example" id={name}>
   {hasImage
