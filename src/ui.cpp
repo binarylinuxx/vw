@@ -520,11 +520,26 @@ void Ui::fade(const Widget& widget, float opacity) {
   }
 }
 
+namespace {
+
+// Offset of a child of `size` inside `space` (both without margins).
+float aligned(Align align, float space, float size) {
+  switch (align) {
+    case Align::start: return 0.0F;
+    case Align::end: return space - size;
+    case Align::center: break;
+  }
+  return (space - size) * 0.5F;
+}
+
+}  // namespace
+
 Widget Ui::linear(std::span<const Widget> children, const LayoutProps& props, bool row) {
   if (children.empty()) throw std::invalid_argument("layout requires at least one child");
   const float gap = props.gap;
   const float padding = props.padding;
-  float main_size = padding * 2.0F + gap * static_cast<float>(children.size() - 1);
+  const auto count = static_cast<float>(children.size());
+  float main_size = padding * 2.0F + gap * (count - 1.0F);
   float cross_size = 0.0F;
   for (const Widget& child : children) {
     const float main_margin = row ? child.margin[3] + child.margin[1]
@@ -536,23 +551,92 @@ Widget Ui::linear(std::span<const Widget> children, const LayoutProps& props, bo
   }
   const float width = props.width.value_or(row ? main_size : cross_size + padding * 2.0F);
   const float height = props.height.value_or(row ? cross_size + padding * 2.0F : main_size);
-  float cursor = padding;
+  // Room to spare along the axis, handed out as justify asks.
+  const float spare = std::max(0.0F, (row ? width : height) - main_size);
+  float lead = 0.0F;
+  float spread = 0.0F;
+  switch (props.justify) {
+    case Justify::start: break;
+    case Justify::center: lead = spare * 0.5F; break;
+    case Justify::end: lead = spare; break;
+    case Justify::space_between:
+      if (children.size() > 1) spread = spare / (count - 1.0F);
+      break;
+    case Justify::space_around:
+      spread = spare / count;
+      lead = spread * 0.5F;
+      break;
+    case Justify::space_evenly:
+      spread = spare / (count + 1.0F);
+      lead = spread;
+      break;
+  }
+  float cursor = padding + lead;
   for (const Widget& child : children) {
     const float available = (row ? height : width) - padding * 2.0F;
+    const float before = row ? child.margin[0] : child.margin[3];
+    const float after = row ? child.margin[2] : child.margin[1];
     const float child_cross = row ? child.height : child.width;
-    const bool end = (child.anchor & (row ? anchor::bottom : anchor::right)) != 0U;
-    const bool start = (child.anchor & (row ? anchor::top : anchor::left)) != 0U;
-    const float cross = start ? padding + (row ? child.margin[0] : child.margin[3])
-                              : end ? padding + available - child_cross -
-                                          (row ? child.margin[2] : child.margin[1])
-                                    : padding + (available - child_cross) * 0.5F;
+    // A child's own anchor wins over the layout's align.
+    Align align = props.align;
+    if ((child.anchor & (row ? anchor::top : anchor::left)) != 0U) align = Align::start;
+    else if ((child.anchor & (row ? anchor::bottom : anchor::right)) != 0U) align = Align::end;
+    // Centring ignores margins, as it always has; the edges honour them.
+    const float cross = align == Align::center
+        ? padding + (available - child_cross) * 0.5F
+        : padding + before + aligned(align, available - before - after, child_cross);
     cursor += row ? child.margin[3] : child.margin[0];
     shift(scene_, child, row ? cursor : cross, row ? cross : cursor);
-    cursor += (row ? child.width + child.margin[1] : child.height + child.margin[2]) + gap;
+    cursor += (row ? child.width + child.margin[1] : child.height + child.margin[2]) + gap + spread;
   }
-  Rectangle style = base_style(props.place, true);
+  return close_group(children, width, height, props.place, props.radius, props.input);
+}
+
+Widget Ui::grid(std::span<const Widget> children, const GridProps& props) {
+  if (children.empty()) throw std::invalid_argument("grid requires at least one child");
+  if (props.columns < 1) throw std::invalid_argument("grid needs at least one column");
+  const auto columns = static_cast<std::size_t>(props.columns);
+  const std::size_t rows = (children.size() + columns - 1) / columns;
+  const float row_gap = props.row_gap.value_or(props.gap);
+  const auto outer_width = [](const Widget& child) { return child.width + child.margin[3] + child.margin[1]; };
+  const auto outer_height = [](const Widget& child) { return child.height + child.margin[0] + child.margin[2]; };
+  float cell_width = 0.0F;
+  if (props.width) {
+    cell_width = std::max(0.0F, (*props.width - props.padding * 2.0F -
+                                 props.gap * static_cast<float>(columns - 1)) /
+                                    static_cast<float>(columns));
+  } else {
+    for (const Widget& child : children) cell_width = std::max(cell_width, outer_width(child));
+  }
+  std::vector<float> row_heights(rows, 0.0F);
+  for (std::size_t index = 0; index < children.size(); ++index)
+    row_heights[index / columns] = std::max(row_heights[index / columns], outer_height(children[index]));
+  float content_height = props.padding * 2.0F + row_gap * static_cast<float>(rows - 1);
+  for (const float row_height : row_heights) content_height += row_height;
+  const float width = props.width.value_or(props.padding * 2.0F + cell_width * static_cast<float>(columns) +
+                                           props.gap * static_cast<float>(columns - 1));
+  const float height = props.height.value_or(content_height);
+  float y = props.padding;
+  for (std::size_t row = 0; row < rows; ++row) {
+    for (std::size_t column = 0; column < columns; ++column) {
+      const std::size_t index = row * columns + column;
+      if (index >= children.size()) break;
+      const Widget& child = children[index];
+      const float x = props.padding + static_cast<float>(column) * (cell_width + props.gap);
+      shift(scene_, child,
+            x + child.margin[3] + aligned(props.align, cell_width - outer_width(child) + child.width, child.width),
+            y + child.margin[0] + aligned(props.align, row_heights[row] - outer_height(child) + child.height, child.height));
+    }
+    y += row_heights[row] + row_gap;
+  }
+  return close_group(children, width, height, props.place, props.radius, props.input);
+}
+
+Widget Ui::close_group(std::span<const Widget> children, float width, float height,
+                       const Placement& place, float radius, const Input& input) {
+  Rectangle style = base_style(place, true);
   style.clip = {0.0F, 0.0F, 0.0F, 0.0F};
-  style.radius = props.radius;
+  style.radius = radius;
   const Widget group{first_begin(children), scene_.rectangles.size(), width, height,
                      style.margin, style.anchor};
   if (!style.visible) hide_range(scene_, group);
@@ -574,7 +658,7 @@ Widget Ui::linear(std::span<const Widget> children, const LayoutProps& props, bo
   carrier.height = height;
   carrier.visible = false;
   scene_.add(carrier);
-  return push(group.begin, width, height, style, props.input);
+  return push(group.begin, width, height, style, input);
 }
 
 Widget Ui::row(std::span<const Widget> children, const LayoutProps& props) {

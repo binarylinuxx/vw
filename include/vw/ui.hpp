@@ -237,12 +237,39 @@ struct TextFieldProps {
   Placement place;
 };
 
+// Where children go along a row or column when it is longer than they are.
+enum class Justify { start, center, end, space_between, space_around, space_evenly };
+// Where a child sits across a row or column, or inside a grid cell.
+enum class Align { start, center, end };
+
 struct LayoutProps {
   float gap = 0.0F;
   float padding = 0.0F;
   // Defaults to the measured size of the children.
   std::optional<float> width;
   std::optional<float> height;
+  // Takes effect when width (row) or height (column) leaves room to spare.
+  Justify justify = Justify::start;
+  // Across the axis; a child's own place.anchor wins over it.
+  Align align = Align::center;
+  float radius = 0.0F;
+  Placement place;
+  Input input;
+};
+
+// Children fill `columns` per row, left to right. Columns are as wide as the
+// widest child, or share `width` equally when it is set; each row is as tall
+// as its tallest child.
+struct GridProps {
+  int columns = 2;
+  float gap = 0.0F;
+  // Between rows; defaults to gap.
+  std::optional<float> row_gap;
+  float padding = 0.0F;
+  std::optional<float> width;
+  std::optional<float> height;
+  // A child inside its cell, on both axes.
+  Align align = Align::center;
   float radius = 0.0F;
   Placement place;
   Input input;
@@ -406,6 +433,7 @@ class Ui {
   Widget row(std::span<const Widget> children, const LayoutProps& props = {});
   Widget column(std::span<const Widget> children, const LayoutProps& props = {});
   Widget stack(std::span<const Widget> children, const StackProps& props = {});
+  Widget grid(std::span<const Widget> children, const GridProps& props = {});
   Widget scrollbox(std::span<const Widget> children, const ScrollProps& props);
   Widget listview(const ListviewProps& props);
   Widget anchor_layout(const AnchorLayoutProps& props);
@@ -415,6 +443,9 @@ class Ui {
   }
   Widget column(std::initializer_list<Widget> children, const LayoutProps& props = {}) {
     return column(std::span<const Widget>(children.begin(), children.size()), props);
+  }
+  Widget grid(std::initializer_list<Widget> children, const GridProps& props = {}) {
+    return grid(std::span<const Widget>(children.begin(), children.size()), props);
   }
   Widget stack(std::initializer_list<Widget> children, const StackProps& props = {}) {
     return stack(std::span<const Widget>(children.begin(), children.size()), props);
@@ -445,6 +476,9 @@ class Ui {
   Widget push(std::size_t begin, float width, float height, const Rectangle& style,
               const Input& input);
   Widget linear(std::span<const Widget> children, const LayoutProps& props, bool row);
+  // Clips the placed children to the group, places the group, and adds it.
+  Widget close_group(std::span<const Widget> children, float width, float height,
+                     const Placement& place, float radius, const Input& input);
   Widget finish_scroll(const Rectangle& style, std::size_t begin, float content_height,
                        float step, const std::shared_ptr<ScrollState>& state,
                        const Input& input);

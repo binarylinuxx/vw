@@ -11,7 +11,34 @@ const vw::Widget label = ui.text({.text = "68%", .size = 14});
 ui.row({icon, label}, {.gap = 8, .padding = 10, .radius = 18, .place = {.x = 12, .y = 6}});
 ```
 
-`row` and `column` take children and `LayoutProps` (`gap`, `padding`, optional fixed `width`/`height`, `radius`, `place`, `input`). Children are centred on the cross axis unless their `place.anchor` asks for an edge (`top`/`bottom` in a row, `left`/`right` in a column); their `margin` is respected. `stack` overlays children in one box. Each returns one widget covering everything, which you can lay out again.
+`row` and `column` take children and `LayoutProps` (`gap`, `padding`, optional fixed `width`/`height`, `justify`, `align`, `radius`, `place`, `input`). `stack` overlays children in one box. Each returns one widget covering everything, which you can lay out again.
+
+When a fixed `width` (row) or `height` (column) leaves room, `justify` places the children along the axis:
+
+| `justify` | Children |
+| --- | --- |
+| `start` (default), `center`, `end` | packed at that end, `gap` apart |
+| `space_between` | first and last at the edges, the rest spread between |
+| `space_around` | equal space around each, half of it at the edges |
+| `space_evenly` | equal space between them and at the edges |
+
+`align` (`start`, `center` by default, `end`) places them across the axis. A child's own `place.anchor` wins: `top`/`bottom` in a row, `left`/`right` in a column. Margins are respected.
+
+```cpp
+// A title bar: title on the left, buttons on the right.
+ui.row({title, ui.row({minimise, close}, {.gap = 6})},
+       {.width = 480, .padding = 12, .justify = vw::Justify::space_between});
+```
+
+## grid
+
+`grid(children, {.columns, .gap, .row_gap, .padding, .width, .height, .align})` fills `columns` cells per row, left to right. Columns are as wide as the widest child, or share a fixed `width` equally; each row is as tall as its tallest child. `align` places a child inside its cell on both axes; `row_gap` defaults to `gap`.
+
+```cpp
+std::vector<vw::Widget> tiles;
+for (const auto& app : apps) tiles.push_back(app_tile(ui, app));
+ui.grid(tiles, {.columns = 4, .gap = 16, .width = 560});
+```
 
 ## anchor_layout
 
