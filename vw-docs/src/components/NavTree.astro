@@ -1,0 +1,21 @@
+---
+// Pages and folders of a sidebar section. A folder opens when it holds the
+// current page; folders nest by rendering this component again.
+import Icon from './Icon.astro';
+import { isGroup, pageUrl, pagesIn, type Entry } from '../data/navigation';
+
+interface Props { items: Entry[]; slug: string; depth?: number }
+const { items, slug, depth = 0 } = Astro.props;
+---
+<ul class:list={['nav-list', { 'nav-nested': depth > 0 }]}>
+  {items.map((entry) => isGroup(entry) ? (
+    <li>
+      <details class="nav-group" open={pagesIn(entry.items).some((page) => page.slug === slug)}>
+        <summary><Icon name="chevron" class="nav-chevron" /><span>{entry.label}</span></summary>
+        <Astro.self items={entry.items} slug={slug} depth={depth + 1} />
+      </details>
+    </li>
+  ) : (
+    <li><a href={pageUrl(entry.slug)} aria-current={entry.slug === slug ? 'page' : undefined}>{entry.label}</a></li>
+  ))}
+</ul>

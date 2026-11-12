@@ -2,7 +2,8 @@
 import Search from '../components/Search.astro';
 import Icon from '../components/Icon.astro';
 import Shape from '../components/Shape.astro';
-import { navigation, allPages, pageUrl, sectionOf } from '../data/navigation';
+import NavTree from '../components/NavTree.astro';
+import { tabs, tabOf, pagesOf, pageUrl, trailOf } from '../data/navigation';
 import '../styles/docs.css';
 
 interface Props {
@@ -13,10 +14,13 @@ interface Props {
   home?: boolean;
 }
 const { title, description, slug, headings = [], home = false } = Astro.props;
-const section = sectionOf(slug);
-const position = allPages.findIndex((page) => page.slug === slug);
-const previous = position > 0 ? allPages[position - 1] : null;
-const next = position >= 0 && position < allPages.length - 1 ? allPages[position + 1] : null;
+const tab = tabOf(slug);
+const trail = trailOf(slug);
+// Previous and next stay within the tab.
+const pages = pagesOf(tab);
+const position = pages.findIndex((page) => page.slug === slug);
+const previous = position > 0 ? pages[position - 1] : null;
+const next = position >= 0 && position < pages.length - 1 ? pages[position + 1] : null;
 const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
 const canonical = Astro.site ? new URL(Astro.url.pathname, Astro.site) : undefined;
 ---
@@ -48,7 +52,7 @@ const canonical = Astro.site ? new URL(Astro.url.pathname, Astro.site) : undefin
         <Shape class="brand-shape" lobes={7} depth={0.09} />
         <span class="brand-name">vw</span>
       </a>
-      <span class="topbar-crumb">{home ? 'Wayland × Vulkan' : section?.label}</span>
+      <span class="topbar-crumb">{home ? 'Wayland × Vulkan' : [tab.label, ...trail].join(' › ')}</span>
     </header>
 
     <div class:list={['frame', { 'is-home': home }]}>
@@ -59,23 +63,26 @@ const canonical = Astro.site ? new URL(Astro.url.pathname, Astro.site) : undefin
             <span><span class="brand-name">vw</span><span class="brand-sub">Wayland widgets on Vulkan</span></span>
           </a>
         </div>
+        <nav class="tabs" aria-label="Documentation sets">
+          {tabs.map((item) => (
+            <a href={pageUrl(item.home)} aria-current={item.id === tab.id ? 'true' : undefined}>
+              <Icon name={item.icon} /><span>{item.label}</span>
+            </a>
+          ))}
+        </nav>
         <button class="search-pill" type="button" data-search-open>
           <Icon name="search" /><span>Search</span><kbd>Ctrl K</kbd>
         </button>
-        <nav class="nav">
-          {navigation.map((group) => (
+        <nav class="nav" aria-label={`${tab.label} pages`}>
+          {tab.sections.map((group) => (
             <div class="nav-section">
               <p class="nav-title"><Icon name={group.icon} />{group.label}</p>
-              <ul>
-                {group.items.map((page) => (
-                  <li><a href={pageUrl(page.slug)} aria-current={page.slug === slug ? 'page' : undefined}>{page.label}</a></li>
-                ))}
-              </ul>
+              <NavTree items={group.items} slug={slug} />
             </div>
           ))}
         </nav>
         <div class="drawer-foot">
-          <span>libvw 0.1 · C++23 · Lua</span>
+          <span>libvw 0.1 · C++23 · Facet · Lua</span>
           <button class="icon-btn theme-btn" type="button" data-theme-toggle aria-label="Switch light or dark">
             <Icon name="sun" class="sun" /><Icon name="moon" class="moon" />
           </button>
@@ -87,7 +94,8 @@ const canonical = Astro.site ? new URL(Astro.url.pathname, Astro.site) : undefin
         {home ? <slot /> : (
           <>
             <div class="crumb">
-              {section && <span class="chip tonal">{section.label}</span>}
+              <span class="chip">{tab.label}</span>
+              {trail.map((label) => <span class="chip tonal">{label}</span>)}
             </div>
             <h1 class="page-title">{title}</h1>
             {description && <p class="page-lede">{description}</p>}

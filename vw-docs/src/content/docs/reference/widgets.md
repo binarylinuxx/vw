@@ -53,7 +53,7 @@ The returned widget has the text's logical size, ready for centring with `ui.mov
 | --- | --- |
 | `path` | a file (PNG, JPEG, WebP, SVG, …) |
 | `icon` | a theme icon name or serialized GIcon, resolved through the icon theme |
-| `bitmap` | pixels in memory, such as a [screen capture](/services/compositors/#screen-capture--vwcapturehpp) |
+| `bitmap` | pixels in memory, such as a [screen capture](/compositor/capture/) |
 | `width`, `height`, `fit` | `0` keeps the natural size or aspect; `fit` is `stretch`, `contain` or `cover` |
 | `radius`, `mask`, `tint`, `effect` | see [Clipping, fading, masks](/guides/composition/) |
 

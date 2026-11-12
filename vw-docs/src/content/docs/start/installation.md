@@ -64,7 +64,7 @@ To package a shell from a flake you already have, hand it to `vw.lib.mkShell`. I
 
 Every other attribute (`version`, `cmakeFlags`, `postInstall`, `meta`, …) goes straight to `mkDerivation`. `.devShell` is a clang shell with everything the package builds with, for `cmake` by hand.
 
-Facet, the declarative view language that compiles to vw, is a separate and optional project. Pass its package as `facet = …;` (or use its flake's own `lib.mkShell`, which does that) to get `facetc` and `facet_compile()` in the build; without it nothing of Facet is involved.
+`facet = true;` builds against vw with [Facet](/facet/introduction/), the declarative view language: `facet_compile()` comes with `find_package(vw)`. Without it nothing of Facet is involved.
 
 For full control, take the overlay instead: it adds `pkgs.vw` and `pkgs.vw-static` next to the rest of nixpkgs, and `find_package(vw)` works as below.
 
@@ -78,6 +78,7 @@ pkgs = import nixpkgs { inherit system; overlays = [ vw.overlays.default ]; };
 | `overlays.default` | adds `pkgs.vw` and `pkgs.vw-static` |
 | `packages.<system>.default`, `.vw` | the library, headers, CMake package, `vw-shaderc`, examples |
 | `packages.<system>.vw-static` | the same with `libvw.a`; overlay name `pkgs.vw-static` |
+| `packages.<system>.vw-facet` | vw with Facet; overlay names `pkgs.vw-facet`, `pkgs.vw-static-facet` |
 | `devShells.<system>.default` | everything needed to work on vw itself |
 | `lib.mkShell` | a CMake shell as a package, vw linked in; `.devShell` to work on it |
 | `templates.default` | a CMake project using vw |
@@ -104,6 +105,7 @@ You need a C++23 compiler (clang is what vw is developed with), CMake, Ninja, `p
 | Option | Default | Effect |
 | --- | --- | --- |
 | `VW_BUILD_EXAMPLES` | `ON` | builds the `vw-example-*` programs from `examples/cpp` |
+| `VW_WITH_FACET` | `OFF` | builds [Facet](/facet/setup/): `vw-facetc`, `<vw/facet.hpp>` and `facet_compile()` |
 | `VW_STATIC` | `OFF` | builds `libvw.a`, which links into your program: a shell ships as one binary with nothing of vw to install |
 | `VW_WITH_LUA` | `ON` | builds the deprecated `vw` Lua frontend |
 | `BUILD_TESTING` | CTest default | adds the frontend's smoke tests |

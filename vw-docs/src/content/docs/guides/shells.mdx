@@ -53,7 +53,7 @@ The handler sees every key first and returns `true` when it handled one; anythin
 
 ## Popups that close on outside clicks
 
-With zwwm, `focus_grab = true` asks the compositor to tell you when the user clicks elsewhere. `on_dismiss` receives a `FocusEvent` whose `reason()` is `outside`, `unmapped`, `replaced`, `locked` or `released`; close your popup there.
+With zwwm, `focus_grab = true` asks the compositor to tell you when the user clicks elsewhere. `on_dismiss` receives a `FocusEvent` whose `reason()` is `outside`, `unmapped`, `replaced`, `locked` or `released`; close your popup there. More in [Focus grabs and decorations](/compositor/zwwm-surfaces/).
 
 ## Coming and going
 

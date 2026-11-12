@@ -150,6 +150,38 @@ button { font: inherit; color: inherit; }
 .search-pill span { flex: 1; font-size: 15px; }
 .search-pill kbd { font: 500 11px var(--mono); padding: 3px 7px; border-radius: var(--r-xs); background: var(--surface-4); color: var(--on-surface-variant); }
 
+/* vw · Compositor · Facet: one sidebar each. */
+.tabs {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px;
+  margin: 0 16px 10px; padding: 4px;
+  border-radius: var(--r-full); background: var(--surface-2);
+}
+.tabs a {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 40px; padding: 0 8px; border-radius: var(--r-full);
+  color: var(--on-surface-variant); text-decoration: none; font-size: 13px; font-weight: 600;
+  transition: background 0.2s var(--ease), color 0.2s var(--ease);
+}
+.tabs a svg { width: 18px; height: 18px; flex: none; }
+.tabs a:hover { color: var(--on-surface); background: var(--surface-3); }
+.tabs a[aria-current] { background: var(--secondary-container); color: var(--on-secondary-container); }
+
+/* Folders inside a section; they nest. */
+.nav-group summary {
+  display: flex; align-items: center; gap: 6px;
+  min-height: 40px; padding: 0 12px 0 14px; border-radius: var(--r-full);
+  list-style: none; cursor: pointer; user-select: none;
+  color: var(--on-surface-variant); font-size: 14px; font-weight: 600;
+  transition: background 0.2s var(--ease), color 0.2s var(--ease);
+}
+.nav-group summary::-webkit-details-marker { display: none; }
+.nav-group summary:hover { background: var(--surface-2); color: var(--on-surface); }
+.nav-chevron { width: 18px; height: 18px; flex: none; transition: transform 0.2s var(--ease); }
+.nav-group[open] > summary .nav-chevron { transform: rotate(90deg); }
+.nav-nested { margin-left: 18px; padding-left: 4px; border-left: 1px solid var(--outline-variant); }
+.nav-nested a { padding-left: 32px; min-height: 40px; font-size: 14.5px; }
+.nav-nested a[aria-current='page']::before { left: 14px; }
+
 .nav { flex: 1; overflow-y: auto; padding: 4px 12px 16px; scrollbar-width: thin; scrollbar-color: var(--surface-4) transparent; }
 .nav-section + .nav-section { margin-top: 6px; }
 .nav-title {

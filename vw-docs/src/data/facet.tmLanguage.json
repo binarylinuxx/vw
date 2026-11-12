@@ -1,0 +1,52 @@
+{
+  "name": "facet",
+  "scopeName": "source.facet",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#cpp-block" },
+    { "include": "#strings" },
+    {
+      "name": "keyword.control.facet",
+      "match": "\\b(let|in|as|view|for|if|then|else|key|include|cpp)\\b"
+    },
+    { "name": "constant.language.facet", "match": "\\b(true|false|null)\\b" },
+    { "name": "constant.numeric.facet", "match": "\\b[0-9]+(\\.[0-9]+)?\\b" },
+    {
+      "match": "\\b(view)\\s+([A-Z][A-Za-z0-9_]*)",
+      "captures": { "1": { "name": "keyword.control.facet" }, "2": { "name": "entity.name.function.facet" } }
+    },
+    { "name": "entity.name.type.facet", "match": "\\b[A-Z][A-Za-z0-9_]*\\b" },
+    { "name": "variable.parameter.facet", "match": "\\b[a-z_][A-Za-z0-9_]*(?=\\s*:(?!:))" },
+    { "name": "constant.other.enum.facet", "match": "\\b[a-z]+(-[a-z]+)+\\b" },
+    { "name": "keyword.operator.facet", "match": "=>|==|!=|<=|>=|&&|\\|\\||[-+*/%<>!?=]" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.facet", "match": "//.*$" },
+        { "name": "comment.block.facet", "begin": "/\\*", "end": "\\*/" }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.facet",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        { "name": "constant.character.escape.facet", "match": "\\\\[nt\"\\\\]" },
+        { "name": "constant.other.color.facet", "match": "#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?" }
+      ]
+    },
+    "cpp-block": {
+      "begin": "\\b(cpp)\\s*(\\{)",
+      "beginCaptures": { "1": { "name": "keyword.control.facet" }, "2": { "name": "punctuation.section.block.begin.facet" } },
+      "end": "\\}",
+      "endCaptures": { "0": { "name": "punctuation.section.block.end.facet" } },
+      "patterns": [{ "include": "#braces" }, { "include": "source.cpp" }]
+    },
+    "braces": {
+      "begin": "\\{",
+      "end": "\\}",
+      "patterns": [{ "include": "#braces" }, { "include": "source.cpp" }]
+    }
+  }
+}
