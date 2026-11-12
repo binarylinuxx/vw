@@ -28,17 +28,25 @@
     in {
       # Adds pkgs.vw; use it from another flake with
       #   import nixpkgs { inherit system; overlays = [ vw.overlays.default ]; }
-      overlays.default = final: prev: {
-        vw = final.callPackage ./nix/package.nix { inherit src zwwm; };
-        # libvw.a: links into the program, so a shell ships as one binary. Its
-        # libraries come along for the program to link.
-        vw-static = final.vw.overrideAttrs (old: {
-          pname = "vw-static";
-          cmakeFlags = old.cmakeFlags ++ [ "-DVW_STATIC=ON" ];
-          propagatedBuildInputs = old.propagatedBuildInputs ++ old.buildInputs;
-          propagatedNativeBuildInputs = (old.propagatedNativeBuildInputs or [ ]) ++ [ final.pkg-config ];
-        });
-      };
+      overlays.default = final: prev:
+        let
+          vw = facet: final.callPackage ./nix/package.nix { inherit src zwwm; withFacet = facet; };
+          # libvw.a: links into the program, so a shell ships as one binary.
+          # Its libraries come along for the program to link.
+          static = package: package.overrideAttrs (old: {
+            pname = old.pname + "-static";
+            cmakeFlags = old.cmakeFlags ++ [ "-DVW_STATIC=ON" ];
+            propagatedBuildInputs = old.propagatedBuildInputs ++ old.buildInputs;
+            propagatedNativeBuildInputs = (old.propagatedNativeBuildInputs or [ ]) ++ [ final.pkg-config ];
+          });
+          facet = package: package.overrideAttrs (old: { pname = old.pname + "-facet"; });
+        in {
+          vw = vw false;
+          vw-static = static (vw false);
+          # With Facet: vw-facetc, <vw/facet.hpp> and facet_compile().
+          vw-facet = facet (vw true);
+          vw-static-facet = facet (static (vw true));
+        };
 
       # A shell (any CMake program on vw) as a package, vw linked in statically:
       #
@@ -54,11 +62,9 @@
       # Every other attribute (version, cmakeFlags, meta, postInstall, ...) goes
       # to mkDerivation.
       #
-      # facet = <Facet's package> adds Facet to the build: facetc, its runtime
-      # and find_package(facet) with facet_compile(). Facet is a separate,
-      # optional project; vw never depends on it. Its flake's lib.mkShell
-      # fills this in.
-      lib.mkShell = { system, pname, src, version ? "0.1.0", shellDeps ? [ ], nativeShellDeps ? [ ], facet ? null, ... }@args:
+      # facet = true builds against vw with Facet: write views in .facet and
+      # facet_compile() them in CMake.
+      lib.mkShell = { system, pname, src, version ? "0.1.0", shellDeps ? [ ], nativeShellDeps ? [ ], facet ? false, ... }@args:
         let
           pkgs = pkgsFor system;
           rest = removeAttrs args [ "system" "shellDeps" "nativeShellDeps" "facet" ];
@@ -71,7 +77,7 @@
             } else src;
             nativeBuildInputs = [ pkgs.cmake pkgs.ninja pkgs.shaderc ] ++ nativeShellDeps
               ++ (args.nativeBuildInputs or [ ]);
-            buildInputs = [ pkgs.vw-static ] ++ nixpkgs.lib.optional (facet != null) facet ++ shellDeps
+            buildInputs = [ (if facet then pkgs.vw-static-facet else pkgs.vw-static) ] ++ shellDeps
               ++ (args.buildInputs or [ ]);
             meta = { mainProgram = pname; platforms = nixpkgs.lib.platforms.linux; } // (args.meta or { });
             passthru = (args.passthru or { }) // {
@@ -87,6 +93,7 @@
         default = pkgs.vw;
         vw = pkgs.vw;
         vw-static = pkgs.vw-static;
+        vw-facet = pkgs.vw-facet;
       });
 
       apps = forAllSystems (pkgs: {

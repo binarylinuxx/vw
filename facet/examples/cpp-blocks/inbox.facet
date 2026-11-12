@@ -1,0 +1,39 @@
+// C++ inside Facet: an include, a file-level block, statements in a view, and
+// a handler written in C++.
+include "inbox.hpp"
+include "<format>"
+
+let [ vw.ui as ui, vw.layout as layout ] in
+
+cpp {
+  // Helpers every view below can call.
+  inline std::string unread_label(int count) {
+    return count == 0 ? std::string("All read") : std::format("{} unread", count);
+  }
+}
+
+view Inbox(state, actions) {
+    // C++ statements: `unread` is usable by the Facet below.
+    cpp {
+        int unread = 0;
+        for (const auto& message : state.messages) unread += message.unread ? 1 : 0;
+    }
+    layout.Column(gap: 8, padding: 16, width: 360, bg: "#151a1e", radius: 16) {
+        ui.Text(text: unread_label(unread), size: 18, weight: bold, color: "#dfe6ee")
+        for message in state.messages key message.subject {
+            ui.Rectangle(
+                width: "100%", height: 44, radius: 10,
+                color: if message.unread then "#20272c" else "#151a1e",
+                input: { on_click: () => cpp {
+                    // Runs on the click: mark it read, count it in C++.
+                    for (auto& stored : state.messages)
+                        if (stored.subject == message.subject) stored.unread = false;
+                    actions.opened += 1;
+                } }
+            ) {
+                ui.Text(text: initials(message.from) + "  " + message.subject, size: 14,
+                        align: center_left, padding: 12, color: "#dfe6ee")
+            }
+        }
+    }
+}

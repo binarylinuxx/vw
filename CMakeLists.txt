@@ -218,6 +218,14 @@ endif()
 
 # Deprecated: the Lua configuration frontend and its service bindings.
 option(VW_WITH_LUA "Build the deprecated Lua frontend (the vw executable)" ON)
+# Facet compiles .facet views to C++ on vw: vw-facetc, <vw/facet.hpp> and
+# facet_compile(). Off by default; nothing else in vw needs it.
+option(VW_WITH_FACET "Build Facet, the declarative view language" OFF)
+if(VW_WITH_FACET)
+  add_subdirectory(facet)
+  install(FILES include/vw/facet.hpp DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/vw")
+  install(FILES cmake/VwFacet.cmake DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/vw")
+endif()
 if(VW_WITH_LUA)
   find_package(Lua 5.4 REQUIRED)
   set(VW_TEMPLATE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/templates/default")

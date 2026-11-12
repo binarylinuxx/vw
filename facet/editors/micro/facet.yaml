@@ -1,0 +1,41 @@
+filetype: facet
+
+detect:
+    filename: "\\.facet$"
+
+# Later rules win where they overlap: strings and comments come last.
+rules:
+    # Named arguments and object fields: `size:`, `on_click:`
+    - identifier: "\\b[a-z_][A-Za-z0-9_]*\\s*:"
+    # Module prefixes and member access: `ui.`, `state.`
+    - identifier.var: "\\b[a-z_][A-Za-z0-9_]*\\."
+    # Elements and views: Surface, Rectangle, AppLauncher
+    - type: "\\b[A-Z][A-Za-z0-9_]*\\b"
+    - statement: "\\b(let|in|as|view|for|if|then|else|key|include|cpp)\\b"
+    - constant.bool: "\\b(true|false|null)\\b"
+    - constant.number: "\\b[0-9]+(\\.[0-9]+)?\\b"
+    # Enum values written with dashes: space-between, space-evenly
+    - constant: "\\b[a-z]+(-[a-z]+)+\\b"
+    - symbol.operator: "=>|==|!=|<=|>=|&&|\\|\\||[-+*/%<>!?=]"
+    - symbol.brackets: "[(){}\\[\\]]"
+
+    - constant.string:
+        start: "\""
+        end: "\""
+        skip: "\\\\."
+        rules:
+            - constant.specialChar: "\\\\[nt\"\\\\]"
+            # Colors: "#20272c", "#a7cbe7f0"
+            - constant.number: "#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?"
+
+    - comment:
+        start: "//"
+        end: "$"
+        rules:
+            - todo: "(TODO|FIXME|XXX):?"
+
+    - comment:
+        start: "/\\*"
+        end: "\\*/"
+        rules:
+            - todo: "(TODO|FIXME|XXX):?"

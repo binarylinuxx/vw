@@ -33,6 +33,8 @@ cmake -S . -B build -G Ninja && cmake --build build
 
 vw builds with clang. Link it with `find_package(vw)` and `vw::vw`.
 
+Views can also be written in [Facet](facet/README.md), a declarative language that compiles to vw C++: build with `-DVW_WITH_FACET=ON`.
+
 Start a project with `vw --init my-widget` (CMake) or `vw --init-nix my-widget` (adds a flake); both build it right away.
 
 ## Nix

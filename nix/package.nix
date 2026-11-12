@@ -5,6 +5,8 @@
   clangStdenv,
   src,
   zwwm,
+  # Facet: vw-facetc, <vw/facet.hpp> and facet_compile() (VW_WITH_FACET).
+  withFacet ? false,
   cmake,
   ninja,
   pkg-config,
@@ -48,7 +50,7 @@ clangStdenv.mkDerivation {
   # vw's public headers include nlohmann/json.hpp, and vwConfig.cmake finds it.
   propagatedBuildInputs = [ nlohmann_json ];
 
-  cmakeFlags = [ "-DZWAYLAND_ROOT=${zwwm}" ];
+  cmakeFlags = [ "-DZWAYLAND_ROOT=${zwwm}" (lib.cmakeBool "VW_WITH_FACET" withFacet) ];
 
   meta = {
     description = "C++23 Wayland widget library with its own Vulkan renderer";

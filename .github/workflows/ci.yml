@@ -11,10 +11,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
-      - name: Build (clang, examples included)
+      - name: Build (clang, examples and Facet included)
         run: |
-          nix develop --command cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          nix develop --command cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DVW_WITH_FACET=ON
           nix develop --command cmake --build build
+      - name: Facet check (headless)
+        run: ./build/facet/vw-facet-cpp-blocks
       - name: Nix package
         run: nix build --print-build-logs
 
