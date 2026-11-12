@@ -60,7 +60,16 @@ add_custom_command(
   DEPENDS zwayland-scanner
           "${ZWAYLAND_ROOT}/zwwm-protocols/protocols/wlr-layer-shell-unstable-v1.xml"
   VERBATIM)
-add_custom_target(vw-wlr-layer-header DEPENDS "${VW_WLR_LAYER_HEADER}")
+# Protocols vw carries itself, ahead of the zwwm release that ships them.
+set(VW_CAPTURE_ACCESS_HEADER "${CMAKE_CURRENT_BINARY_DIR}/zwwm-capture-access-v1-zwayland-client.h")
+add_custom_command(
+  OUTPUT "${VW_CAPTURE_ACCESS_HEADER}"
+  COMMAND "$<TARGET_FILE:zwayland-scanner>" zwayland-client-header
+          "${CMAKE_CURRENT_SOURCE_DIR}/protocols/zwwm-capture-access-v1.xml"
+          "${VW_CAPTURE_ACCESS_HEADER}"
+  DEPENDS zwayland-scanner "${CMAKE_CURRENT_SOURCE_DIR}/protocols/zwwm-capture-access-v1.xml"
+  VERBATIM)
+add_custom_target(vw-protocol-headers DEPENDS "${VW_WLR_LAYER_HEADER}" "${VW_CAPTURE_ACCESS_HEADER}")
 
 # vw-shaderc compiles GLSL into .vws, vw's shader format (src/vws.hpp). It is
 # a host tool with no dependencies, exported as vw::shaderc.
@@ -133,7 +142,7 @@ set_target_properties(vw_core PROPERTIES
   EXPORT_NAME vw
   VERSION "${PROJECT_VERSION}"
   SOVERSION "${PROJECT_VERSION_MAJOR}")
-add_dependencies(vw_core vw-shaders vw-wlr-layer-header zwwm_protocol_headers)
+add_dependencies(vw_core vw-shaders vw-protocol-headers zwwm_protocol_headers)
 target_include_directories(vw_core
   PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
          "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
