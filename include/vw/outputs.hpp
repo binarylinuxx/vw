@@ -34,6 +34,13 @@ std::vector<Output> outputs();
 // The output called `name`, if it is connected.
 std::optional<Output> output(std::string_view name);
 
+// The output the surface being built is for: its monitor in
+// App::per_output, otherwise the first output. Empty (all zero) without one.
+Output current_output();
+// Set by App::per_output around each build; nullopt goes back to the first
+// output.
+void set_current_output(std::optional<Output> output);
+
 // Readable when outputs changed; see vw::App::on_event. vw::App already
 // watches it. -1 without a Wayland connection.
 int output_event_fd();

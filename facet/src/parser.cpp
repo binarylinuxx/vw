@@ -1,5 +1,7 @@
 #include "syntax.hpp"
 
+#include <algorithm>
+
 namespace facet {
 namespace {
 
@@ -28,8 +30,13 @@ class Parser {
     for (;;) {
       top_level(result);
       if (at(Token::end)) break;
+      if (!at(Token::view))
+        throw Error(current().at, "at the top of a file Facet takes 'view Name(…) { … }', 'properties(id: name) { … }', "
+                                  "'let name = value', 'include \"header\"' or 'cpp { … }', not '" +
+                                  current().text + "'; elements go inside a view");
       result.views.push_back(view());
     }
+    apply_properties(result);
     return result;
   }
 
@@ -37,7 +44,9 @@ class Parser {
   // or between views.
   void top_level(File& result) {
     for (;;) {
-      if (at(Token::let) && ahead(1).kind == Token::identifier) {
+      if (at(Token::identifier) && current().text == "properties" && ahead(1).kind == Token::lparen) {
+        result.properties.push_back(properties());
+      } else if (at(Token::let) && ahead(1).kind == Token::identifier) {
         Constant constant;
         constant.at = current().at;
         ++position_;
@@ -59,6 +68,90 @@ class Parser {
   }
 
  private:
+  // properties(id: name) { width: 200, height: 36 } — commas optional.
+  Properties properties() {
+    Properties result;
+    result.at = current().at;
+    position_ += 2;  // properties (
+    if (!(at(Token::identifier) && current().text == "id" && ahead(1).kind == Token::colon))
+      throw Error(current().at, "properties names its element: properties(id: name) { … }");
+    position_ += 2;
+    result.id = expect(Token::identifier, "naming the element after 'id:'").text;
+    expect(Token::rparen, "after the element's name");
+    expect(Token::lbrace, "to open the properties");
+    while (!at(Token::rbrace)) {
+      if (at(Token::end)) throw Error(current().at, "these properties never close");
+      Argument argument;
+      argument.at = current().at;
+      argument.name = expect(Token::identifier, "naming a property").text;
+      expect(Token::colon, "after the property name");
+      argument.value = expression();
+      if (argument.name == "id") throw Error(argument.at, "the element's id goes in properties(id: …)");
+      result.arguments.push_back(std::move(argument));
+      (void)(accept(Token::comma) || accept(Token::semicolon));
+    }
+    expect(Token::rbrace, "to close the properties");
+    return result;
+  }
+
+  static ExprPtr clone(const Expr& value) {
+    auto copy = std::make_unique<Expr>();
+    copy->kind = value.kind;
+    copy->at = value.at;
+    copy->text = value.text;
+    for (const auto& operand : value.operands) copy->operands.push_back(clone(*operand));
+    copy->parameters = value.parameters;
+    for (const auto& [name, field] : value.fields) copy->fields.emplace_back(name, field ? clone(*field) : nullptr);
+    copy->block = value.block;
+    copy->cpp_body = value.cpp_body;
+    copy->code = value.code;
+    copy->code_at = value.code_at;
+    return copy;
+  }
+
+  // An object set in both places merges field by field (place: { x } and
+  // place: { y } give both); anything else the element sets replaces it.
+  static void merge(Expr& own, const Expr& given) {
+    for (const auto& [name, field] : given.fields) {
+      const auto found = std::ranges::find_if(own.fields, [&](const auto& item) { return item.first == name; });
+      if (found == own.fields.end()) own.fields.emplace_back(name, clone(*field));
+      else if (found->second->kind == Expr::Kind::object && field->kind == Expr::Kind::object)
+        merge(*found->second, *field);
+    }
+  }
+
+  static void apply_properties(File& file) {
+    for (std::size_t index = 0; index < file.properties.size(); ++index)
+      for (std::size_t other = 0; other < index; ++other)
+        if (file.properties[other].id == file.properties[index].id)
+          throw Error(file.properties[index].at, "'" + file.properties[index].id + "' already has properties");
+    for (auto& view : file.views) apply_properties(file, view.body);
+    for (const auto& set : file.properties)
+      if (!set.used)
+        throw Error(set.at, "no element has id: " + set.id + " (give one, e.g. S.Surface(id: " + set.id + ", …))");
+  }
+
+  static void apply_properties(File& file, Block& nodes) {
+    for (auto& node : nodes) {
+      apply_properties(file, node->children);
+      apply_properties(file, node->otherwise);
+      if (node->kind != Node::Kind::element) continue;
+      const auto id = std::ranges::find_if(node->arguments, [](const Argument& item) { return item.name == "id"; });
+      if (id == node->arguments.end() || id->value->kind != Expr::Kind::identifier) continue;
+      const auto set = std::ranges::find_if(file.properties, [&](const Properties& item) { return item.id == id->value->text; });
+      if (set == file.properties.end()) continue;
+      set->used = true;
+      for (const auto& given : set->arguments) {
+        const auto own = std::ranges::find_if(node->arguments, [&](const Argument& item) { return item.name == given.name; });
+        if (own == node->arguments.end()) {
+          node->arguments.push_back({given.name, clone(*given.value), given.at});
+        } else if (own->value->kind == Expr::Kind::object && given.value->kind == Expr::Kind::object) {
+          merge(*own->value, *given.value);
+        }
+      }
+    }
+  }
+
   const Lexeme& current() const { return tokens_[position_]; }
   const Lexeme& ahead(std::size_t offset) const {
     return tokens_[std::min(position_ + offset, tokens_.size() - 1)];

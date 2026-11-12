@@ -123,11 +123,21 @@ struct Constant {
   Location at;
 };
 
+// properties(id: bar) { height: 36, … } at file level: properties for the
+// element named `id: bar`. What the element sets itself wins.
+struct Properties {
+  std::string id;
+  std::vector<Argument> arguments;
+  Location at;
+  bool used = false;
+};
+
 struct File {
   std::vector<Code> includes;  // include "x.hpp": the header names
   std::vector<Import> imports;
   std::vector<Code> prelude;   // file-level cpp { … }, before every view
   std::vector<Constant> constants;
+  std::vector<Properties> properties;
   std::vector<View> views;
 };
 

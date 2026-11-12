@@ -63,6 +63,7 @@ SIGINT и SIGTERM аккуратно завершают `run()`.
 | --- | --- |
 | `vw::outputs()` | все подключённые `vw::Output` в порядке композитора |
 | `vw::output(name)` | монитор с именем `name` или `std::nullopt` |
+| `vw::current_output()` | монитор строящейся поверхности: свой в `per_output`, иначе первый; это `screen` в Facet |
 | `vw::output_event_fd()`, `vw::drain_output_events()` | источник изменений; `App::run()` уже следит за ним |
 
 | Поле `vw::Output` | Значение |

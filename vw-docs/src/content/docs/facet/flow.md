@@ -1,6 +1,6 @@
 ---
 title: Loops, conditions, let
-description: Repeating elements, choosing between them, naming values and naming elements.
+description: Repeating elements, choosing between them, naming values and elements, and properties blocks.
 ---
 
 ## for
@@ -65,3 +65,22 @@ S.Surface(id: panel, width: 200, height: 100) {
 The name stands for the element's props: what it was given, plus the defaults of its props struct, as C++ sees them (`panel.width` is `SurfaceProps::width`). It is not measured layout, so a Text's width is not known through its id. Two elements in one block cannot share a name.
 
 On a control, `id: "search"` (a string) or a variable still sets the control's state key, as before; only a name not already in use names the element.
+
+## properties
+
+At the top of the file, `properties(id: name) { … }` sets properties for the element named `id: name`, so a view holds structure and the sizes, colors and places sit apart, like a stylesheet for one element:
+
+```facet
+properties(id: panel) {
+    variant: "panel"
+    width: 200
+    height: 100
+    place: { x: 10 }
+}
+
+view Bar(state, actions) {
+    S.Surface(id: panel, place: { y: 20 }) { … }
+}
+```
+
+Properties are written one per line, with or without commas. What the element sets itself wins; an object set in both places merges field by field, so the panel above sits at `x: 10, y: 20`. Values may use file-level `let`s and other elements' names (`panel.height - 34`), as they could on the element. A `properties` block for a name no element uses is an error.

@@ -98,7 +98,12 @@ App& App::per_output(OutputBuildFunction build, std::size_t most) {
     surfaces_.push_back(std::make_unique<Surface>(
         [group, shared, slot](Ui& ui) {
           // No monitor for this slot: it draws nothing and stays unmapped.
-          if (const std::optional<Output> output = group->at(slot)) (*shared)(ui, *output);
+          const std::optional<Output> output = group->at(slot);
+          if (!output) return;
+          // vw::current_output() (and Facet's `screen`) is this monitor.
+          set_current_output(output);
+          struct Reset { ~Reset() { set_current_output(std::nullopt); } } reset;
+          (*shared)(ui, *output);
         },
         [group, slot] { return group->name(slot); }));
   }

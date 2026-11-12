@@ -14,6 +14,7 @@ description: Values, colors, enum names, operators, conditionals, lambdas and th
 | `[a, b, c]` | a list |
 | `state.items`, `items[0]`, `format_bytes(n)` | members, indexing and calls: plain C++ |
 | `items.length` | the size of a list |
+| `screen.width`, `screen.height`, `screen.name` | the monitor being drawn on (also `x`, `y`, `scale`, `refresh` in Hz); with [`App::per_output`](/guides/shells/#one-bar-per-monitor), each bar's own |
 
 ## Operators
 

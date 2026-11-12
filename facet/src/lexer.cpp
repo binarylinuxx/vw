@@ -44,6 +44,10 @@ const char* describe(Token token) {
     case Token::as: return "'as'";
     case Token::then: return "'then'";
     case Token::else_: return "'else'";
+    case Token::view: return "'view'";
+    case Token::let: return "'let'";
+    case Token::include: return "'include'";
+    case Token::semicolon: return "';'";
     default: return "a token";
   }
 }

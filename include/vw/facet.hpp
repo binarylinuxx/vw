@@ -40,6 +40,26 @@ auto add(const A& left, const B& right) {
 
 // vw layouts need a child, and vw rejects empty geometry: an empty for or
 // if leaves a 1x1 invisible area behind.
+// `screen` in a view: the monitor being drawn on (vw::current_output()),
+// with float sizes so arithmetic on them never wraps around.
+struct Screen {
+  std::string name;
+  std::string description;
+  float x = 0;
+  float y = 0;
+  float width = 0;
+  float height = 0;
+  float scale = 1;
+  float refresh = 0;  // Hz
+};
+
+inline Screen screen() {
+  const vw::Output output = vw::current_output();
+  return {output.name, output.description, static_cast<float>(output.x), static_cast<float>(output.y),
+          static_cast<float>(output.width), static_cast<float>(output.height), static_cast<float>(output.scale),
+          static_cast<float>(output.refresh) / 1000.0F};
+}
+
 inline vw::Widget nothing(vw::Ui& ui) {
   vw::HitAreaProps area;
   area.width = area.height = 1;

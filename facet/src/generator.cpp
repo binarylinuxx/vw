@@ -970,6 +970,8 @@ class Generator {
       case K::identifier:
         // Inside a handler a view parameter is reached through its pointer.
         if (lambdas_ > 0 && parameter(value.text) && !shadowed(value.text)) return "(*" + reference(value.text) + ")";
+        // The monitor being drawn on, unless the view names something screen.
+        if (value.text == "screen" && !local(value.text) && !parameter(value.text)) return "facet::screen()";
         return value.text;
       case K::member:
         if (value.text == "length") return std::format("std::size({})", expression(*value.operands[0]));

@@ -198,6 +198,18 @@ std::optional<Output> output(std::string_view name) {
   return std::nullopt;
 }
 
+namespace {
+thread_local std::optional<Output> building;
+}
+
+Output current_output() {
+  if (building) return *building;
+  std::vector<Output> all = outputs();
+  return all.empty() ? Output{} : std::move(all.front());
+}
+
+void set_current_output(std::optional<Output> output) { building = std::move(output); }
+
 int output_event_fd() { return watcher().fd(); }
 
 bool drain_output_events() {

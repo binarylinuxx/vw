@@ -63,6 +63,7 @@ Functions in `vw/host.hpp` describe the surface being built:
 | --- | --- |
 | `vw::outputs()` | every connected `vw::Output`, in the compositor's order |
 | `vw::output(name)` | the one called `name`, or `std::nullopt` |
+| `vw::current_output()` | the monitor of the surface being built: its own in `per_output`, else the first; Facet's `screen` |
 | `vw::output_event_fd()`, `vw::drain_output_events()` | the change source; `App::run()` already watches it |
 
 | `vw::Output` field | Meaning |

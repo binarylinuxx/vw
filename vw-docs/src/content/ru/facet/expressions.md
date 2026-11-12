@@ -14,6 +14,7 @@ description: Значения, цвета, имена перечислений, 
 | `[a, b, c]` | список |
 | `state.items`, `items[0]`, `format_bytes(n)` | поля, индексы и вызовы: обычный C++ |
 | `items.length` | размер списка |
+| `screen.width`, `screen.height`, `screen.name` | монитор, на котором рисуется view (а также `x`, `y`, `scale`, `refresh` в Гц); с [`App::per_output`](/ru/guides/shells/#панель-на-каждый-монитор) — у каждой панели свой |
 
 ## Операторы
 
