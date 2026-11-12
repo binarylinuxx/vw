@@ -25,6 +25,7 @@ export const tabs: Tab[] = [
         {label: 'Lock screens', slug: 'guides/locking'},
       ]},
       {label: 'Drawing', items: [
+        {label: 'Styling', slug: 'guides/styling'},
         {label: 'Clipping, fading, masks', slug: 'guides/composition'},
         {label: 'Custom shaders', slug: 'guides/shaders'},
       ]},
