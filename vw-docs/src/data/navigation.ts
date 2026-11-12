@@ -57,6 +57,7 @@ export const tabs: Tab[] = [
       {label: 'System', items: [
         {label: 'Network, Bluetooth, power', slug: 'services/system'},
         {label: 'Processes and IPC', slug: 'services/processes'},
+        {label: 'Login (greetd)', slug: 'services/greetd'},
       ]},
     ]},
     {label: 'Lua', icon: 'lua', items: [

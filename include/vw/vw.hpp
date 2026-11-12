@@ -7,6 +7,7 @@
 #include "vw/bluetooth.hpp"
 #include "vw/brightness.hpp"
 #include "vw/capture.hpp"
+#include "vw/greetd.hpp"
 #include "vw/host.hpp"
 #include "vw/hyprland.hpp"
 #include "vw/ipc.hpp"
