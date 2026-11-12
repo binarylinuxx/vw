@@ -460,6 +460,11 @@ class Ui {
 
   void hide(const Widget& widget);
   void move(const Widget& widget, float dx, float dy);
+  // Places a built widget in the surface: centred by default, or against
+  // the edges in `where` (vw::anchor bits), `margin` ({top, right, bottom,
+  // left}) away from them. The surface is the configured size when there
+  // is one (a fill-width bar), else everything drawn so far.
+  void align(const Widget& widget, std::uint32_t where = anchor::center, const Margin& margin = {});
 
   void surface(const SurfaceProps& props);
   void toplevel(const ToplevelProps& props);

@@ -856,6 +856,31 @@ void Ui::hide(const Widget& widget) { hide_range(scene_, widget); }
 
 void Ui::move(const Widget& widget, float dx, float dy) { shift(scene_, widget, dx, dy); }
 
+void Ui::align(const Widget& widget, std::uint32_t where, const Margin& margin) {
+  if (widget.begin >= widget.end) return;
+  // Where the widget is now: the top-left of everything it covers.
+  float x = std::numeric_limits<float>::max();
+  float y = std::numeric_limits<float>::max();
+  for (std::size_t index = widget.begin; index < widget.end && index < scene_.rectangles.size(); ++index) {
+    x = std::min(x, scene_.rectangles[index].x);
+    y = std::min(y, scene_.rectangles[index].y);
+  }
+  if (x == std::numeric_limits<float>::max()) return;
+  const Size configured = surface_size();
+  const float width = configured.width != 0 ? static_cast<float>(configured.width) : static_cast<float>(scene_.width);
+  const float height = configured.height != 0 ? static_cast<float>(configured.height) : static_cast<float>(scene_.height);
+  const auto place = [](bool start, bool end, float space, float size, float before, float after) {
+    if (start && !end) return before;
+    if (end && !start) return space - size - after;
+    return (space - size + before - after) * 0.5F;
+  };
+  const float target_x = place((where & anchor::left) != 0U, (where & anchor::right) != 0U, width, widget.width,
+                               static_cast<float>(margin[3]), static_cast<float>(margin[1]));
+  const float target_y = place((where & anchor::top) != 0U, (where & anchor::bottom) != 0U, height, widget.height,
+                               static_cast<float>(margin[0]), static_cast<float>(margin[2]));
+  shift(scene_, widget, target_x - x, target_y - y);
+}
+
 void Ui::surface(const SurfaceProps& props) {
   const Size configured = surface_size();
   // A fill axis takes the configured size; before the first configure the

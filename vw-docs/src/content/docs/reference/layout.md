@@ -3,6 +3,31 @@ title: Layout
 description: Layout happens after building — widgets are measured first, then rows, columns, stacks and anchor layouts move them into place. Lists render only what is visible.
 ---
 
+## Positioning and centering
+
+Every widget starts at the top-left of the surface. To put it somewhere else:
+
+| Want | Use |
+| --- | --- |
+| centred, or against an edge of the surface | `ui.align(widget, vw::anchor::center)`, with `left`, `right`, `top`, `bottom` bits and a `{top, right, bottom, left}` margin |
+| a fixed spot | `.place = {.x = 24, .y = 8}` in its props |
+| nudged after it is built | `ui.move(widget, dx, dy)` |
+| arranged with others | a `row`, `column`, `grid` or `stack` below |
+
+A bar with the date on the left, a clock in the middle and the network on the right:
+
+```cpp
+const vw::Widget date = ui.text({.text = "Thu 12"});
+const vw::Widget clock = ui.text({.text = "23:01"});
+const vw::Widget net = ui.text({.text = "Wired connection 1"});
+ui.align(date, vw::anchor::left, {0, 0, 0, 12});
+ui.align(clock);                                    // centre, both ways
+ui.align(net, vw::anchor::right, {0, 12, 0, 0});
+ui.surface({.width = 0, .height = 32, .anchor = vw::anchor::top});
+```
+
+`align` measures against the configured surface when there is one (here the full-width bar), else against everything drawn so far. The clock stays in the middle whatever the widths of its neighbours, which `justify = space_between` only does when they match.
+
 ## row, column, stack
 
 ```cpp
