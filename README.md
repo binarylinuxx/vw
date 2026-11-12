@@ -33,6 +33,16 @@ cmake -S . -B build -G Ninja && cmake --build build
 
 vw builds with clang. Link it with `find_package(vw)` and `vw::vw`.
 
+## Nix
+
+```sh
+nix flake init -t github:binarylinuxx/vw   # a new CMake project using vw
+```
+
+In an existing flake, add the input `vw.url = "github:binarylinuxx/vw"` and the
+overlay `vw.overlays.default`, then put `pkgs.vw` in `buildInputs`. See
+[Install and build](https://vw.zapzig.org/start/installation/#in-a-nix-flake-project).
+
 ## License
 
 BSD 3-Clause. See [LICENSE](LICENSE).

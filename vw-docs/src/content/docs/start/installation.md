@@ -15,6 +15,50 @@ cmake --build build
 
 `nix build` produces `libvw`, its headers, shaders and the `vw` Lua frontend; `nix run` starts the frontend.
 
+## In a Nix flake project
+
+Start a project from the template, which has a flake, a `CMakeLists.txt` and a first surface:
+
+```sh
+mkdir my-widget && cd my-widget
+nix flake init -t github:binarylinuxx/vw
+git init && git add -A          # flakes only see tracked files
+nix run                         # builds and starts it
+nix develop                     # or work on it with cmake by hand
+```
+
+To add vw to a flake you already have, take its overlay, which puts `pkgs.vw` next to the rest of nixpkgs:
+
+```nix
+{
+  inputs = {
+    vw.url = "github:binarylinuxx/vw";
+    nixpkgs.follows = "vw/nixpkgs";
+  };
+
+  outputs = { self, nixpkgs, vw }:
+    let pkgs = import nixpkgs { system = "x86_64-linux"; overlays = [ vw.overlays.default ]; };
+    in {
+      packages.x86_64-linux.default = pkgs.clangStdenv.mkDerivation {
+        pname = "my-widget";
+        version = "0.1.0";
+        src = ./.;
+        nativeBuildInputs = [ pkgs.cmake pkgs.ninja ];
+        buildInputs = [ pkgs.vw ];
+      };
+    };
+}
+```
+
+`find_package(vw)` then works as below. Add `pkgs.shaderc` to `nativeBuildInputs` if you compile shaders with `vw_compile_shader()`. `vw.packages.<system>.default` is the same package without the overlay.
+
+| Flake output | What it is |
+| --- | --- |
+| `overlays.default` | adds `pkgs.vw` |
+| `packages.<system>.default`, `.vw` | the library, headers, CMake package, `vw-shaderc`, examples |
+| `devShells.<system>.default` | everything needed to work on vw itself |
+| `templates.default` | a CMake project using vw |
+
 ## Without Nix
 
 You need a C++23 compiler (clang is what vw is developed with), CMake, Ninja, `pkg-config`, `glslc` (shaderc) and `wayland-scanner`, plus:
@@ -36,7 +80,7 @@ You need a C++23 compiler (clang is what vw is developed with), CMake, Ninja, `p
 
 | Option | Default | Effect |
 | --- | --- | --- |
-| `VW_BUILD_EXAMPLES` | `ON` | builds `vw-example-bar`, `-launcher`, `-status`, `-tasks` |
+| `VW_BUILD_EXAMPLES` | `ON` | builds the `vw-example-*` programs from `examples/cpp` |
 | `VW_WITH_LUA` | `ON` | builds the deprecated `vw` Lua frontend |
 | `BUILD_TESTING` | CTest default | adds the frontend's smoke tests |
 

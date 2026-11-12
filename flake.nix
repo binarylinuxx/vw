@@ -12,71 +12,51 @@
   outputs = { self, nixpkgs, zwwm }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
-      forAllSystems = nixpkgs.lib.genAttrs systems;
+      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f (import nixpkgs {
+        inherit system;
+        overlays = [ self.overlays.default ];
+      }));
+      src = nixpkgs.lib.cleanSourceWith {
+        src = self;
+        filter = path: type:
+          let name = baseNameOf path;
+          in name != "build" && name != "result" && name != "node_modules" && name != "dist" &&
+             name != ".astro" && name != "vw-docs" && name != "templates" &&
+             !(nixpkgs.lib.hasSuffix ".ppm" name);
+      };
     in {
-      packages = forAllSystems (system:
-        let pkgs = nixpkgs.legacyPackages.${system};
-        in {
-          default = pkgs.clangStdenv.mkDerivation {
-            pname = "vw";
-            version = "0.1.0";
-            src = pkgs.lib.cleanSourceWith {
-              src = self;
-              filter = path: type:
-                let name = baseNameOf path;
-                 in name != "build" && name != "result" &&
-                    name != "node_modules" && name != "dist" && name != ".astro" &&
-                   !(pkgs.lib.hasSuffix ".ppm" name);
-            };
-            nativeBuildInputs = with pkgs; [ cmake ninja pkg-config shaderc wayland-scanner ];
-            buildInputs = with pkgs; [ cairo fontconfig freetype glib sysprof gtk3 harfbuzz librsvg libwebp libxml2 lua5_4 nlohmann_json pam pango pipewire quickjs stb vulkan-headers vulkan-loader wayland wayland-protocols libxkbcommon ];
-            cmakeFlags = [ "-DZWAYLAND_ROOT=${zwwm}" ];
-          };
-        });
+      # Adds pkgs.vw; use it from another flake with
+      #   import nixpkgs { inherit system; overlays = [ vw.overlays.default ]; }
+      overlays.default = final: prev: {
+        vw = final.callPackage ./nix/package.nix { inherit src zwwm; };
+      };
 
-      apps = forAllSystems (system: {
+      packages = forAllSystems (pkgs: {
+        default = pkgs.vw;
+        vw = pkgs.vw;
+      });
+
+      apps = forAllSystems (pkgs: {
         default = {
           type = "app";
-          program = "${self.packages.${system}.default}/bin/vw";
+          program = nixpkgs.lib.getExe pkgs.vw;
+          meta.description = "vw's Lua frontend";
         };
       });
 
-      devShells = forAllSystems (system:
-        let pkgs = nixpkgs.legacyPackages.${system};
-        in {
-          default = (pkgs.mkShell.override { stdenv = pkgs.clangStdenv; }) {
-            ZWAYLAND_ROOT = "${zwwm}";
-            packages = with pkgs; [
-              cmake
-              ninja
-              pkg-config
-              shaderc
-              libxml2
-              fontconfig
-              freetype
-              glib
-              sysprof # glib-2.0.pc requires sysprof-capture-4
-              gtk3
-              harfbuzz
-              librsvg
-              libwebp
-              stb
-              nlohmann_json
-              pam
-              pipewire
-              quickjs
-              lua5_4
-              vulkan-headers
-              vulkan-loader
-              vulkan-tools
-              wayland
-              wayland-scanner
-              wayland-protocols
-              libxkbcommon
-              cairo
-              pango
-            ];
-          };
-        });
+      # For working on vw itself: everything the package builds with.
+      devShells = forAllSystems (pkgs: {
+        default = (pkgs.mkShell.override { stdenv = pkgs.clangStdenv; }) {
+          inputsFrom = [ pkgs.vw ];
+          packages = [ pkgs.vulkan-tools ];
+          ZWAYLAND_ROOT = "${zwwm}";
+        };
+      });
+
+      # nix flake init -t github:binarylinuxx/vw
+      templates.default = {
+        path = ./templates/default;
+        description = "A C++ project using vw, built with CMake";
+      };
     };
 }
