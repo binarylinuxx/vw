@@ -29,11 +29,20 @@
       #   import nixpkgs { inherit system; overlays = [ vw.overlays.default ]; }
       overlays.default = final: prev: {
         vw = final.callPackage ./nix/package.nix { inherit src zwwm; };
+        # libvw.a: links into the program, so a shell ships as one binary. Its
+        # libraries come along for the program to link.
+        vw-static = final.vw.overrideAttrs (old: {
+          pname = "vw-static";
+          cmakeFlags = old.cmakeFlags ++ [ "-DVW_STATIC=ON" ];
+          propagatedBuildInputs = old.propagatedBuildInputs ++ old.buildInputs;
+          propagatedNativeBuildInputs = (old.propagatedNativeBuildInputs or [ ]) ++ [ final.pkg-config ];
+        });
       };
 
       packages = forAllSystems (pkgs: {
         default = pkgs.vw;
         vw = pkgs.vw;
+        vw-static = pkgs.vw-static;
       });
 
       apps = forAllSystems (pkgs: {

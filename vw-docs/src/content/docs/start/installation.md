@@ -62,12 +62,13 @@ To add vw to a flake you already have, take its overlay, which puts `pkgs.vw` ne
 }
 ```
 
-`find_package(vw)` then works as below. Add `pkgs.shaderc` to `nativeBuildInputs` if you compile shaders with `vw_compile_shader()`. `vw.packages.<system>.default` is the same package without the overlay.
+`find_package(vw)` then works as below. For a shell, use `pkgs.vw-static` instead: vw links into your binary, so the package is the shell alone. Add `pkgs.shaderc` to `nativeBuildInputs` if you compile shaders with `vw_compile_shader()`. `vw.packages.<system>.default` is the same package without the overlay.
 
 | Flake output | What it is |
 | --- | --- |
 | `overlays.default` | adds `pkgs.vw` |
 | `packages.<system>.default`, `.vw` | the library, headers, CMake package, `vw-shaderc`, examples |
+| `packages.<system>.vw-static` | the same with `libvw.a`; overlay name `pkgs.vw-static` |
 | `devShells.<system>.default` | everything needed to work on vw itself |
 | `templates.default` | a CMake project using vw |
 
@@ -93,6 +94,7 @@ You need a C++23 compiler (clang is what vw is developed with), CMake, Ninja, `p
 | Option | Default | Effect |
 | --- | --- | --- |
 | `VW_BUILD_EXAMPLES` | `ON` | builds the `vw-example-*` programs from `examples/cpp` |
+| `VW_STATIC` | `OFF` | builds `libvw.a`, which links into your program: a shell ships as one binary with nothing of vw to install |
 | `VW_WITH_LUA` | `ON` | builds the deprecated `vw` Lua frontend |
 | `BUILD_TESTING` | CTest default | adds the frontend's smoke tests |
 

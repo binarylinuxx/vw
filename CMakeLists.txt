@@ -94,7 +94,15 @@ add_custom_target(vw-shaders DEPENDS "${VW_BUILTIN_SHADERS_HEADER}")
 
 # libvw: the C++ API (vw/vw.hpp). Wayland, Vulkan and the toolkit libraries
 # are private, so consumers only need nlohmann_json.
-add_library(vw_core SHARED
+# A static libvw links into the program itself: a shell ships as one binary
+# with no libvw to install. Only system libraries stay shared.
+option(VW_STATIC "Build libvw as a static library" OFF)
+if(VW_STATIC)
+  set(VW_LIBRARY_TYPE STATIC)
+else()
+  set(VW_LIBRARY_TYPE SHARED)
+endif()
+add_library(vw_core ${VW_LIBRARY_TYPE}
   src/animation.cpp
   src/app.cpp
   src/applications.cpp
@@ -156,8 +164,18 @@ target_link_libraries(vw_core
     ${PAM_LIBRARY}
     ${QUICKJS_LIBRARY}
     ${CMAKE_DL_LIBS}
-    zwayland-client
-    zwwm::protocol_metadata)
+    $<BUILD_INTERFACE:zwayland-client>
+    $<BUILD_INTERFACE:zwwm::protocol_metadata>)
+if(VW_STATIC)
+  # zwayland is built here and never installed: compile its client into
+  # libvw.a, so programs linking vw::vw find every symbol.
+  foreach(dependency zwayland-client zwayland-wire)
+    get_target_property(directory ${dependency} SOURCE_DIR)
+    get_target_property(sources ${dependency} SOURCES)
+    list(TRANSFORM sources PREPEND "${directory}/")
+    target_sources(vw_core PRIVATE ${sources})
+  endforeach()
+endif()
 # Built-in shaders are embedded (vw_builtin_shaders.hpp); VW_SHADER_DIR can
 # point at newer .vws files while working on them.
 target_compile_definitions(vw_core PRIVATE VW_VERSION="${PROJECT_VERSION}")
