@@ -22,6 +22,14 @@
 namespace vw {
 namespace {
 using Clock = std::chrono::steady_clock;
+
+// QuickJS spells JS_UNDEFINED as a C compound literal; keep that C here.
+JSValue undefined_value() {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc99-extensions"
+  return JS_UNDEFINED;
+#pragma clang diagnostic pop
+}
 enum Operation {
   fill_rect, stroke_rect, clear_rect, begin_path, close_path, move_to, line_to,
   arc, bezier_curve, quadratic_curve, path_rect, fill, stroke, clip,
@@ -366,7 +374,7 @@ class Canvas {
         default: throw std::invalid_argument("unknown canvas operation");
       }
       self->check_cairo();
-      return JS_UNDEFINED;
+      return undefined_value();
     } catch (const std::exception& error) {
       return JS_ThrowTypeError(context, "%s", error.what());
     }
@@ -410,7 +418,14 @@ std::pair<float, float> add_canvas(Scene& scene, std::string_view id,
   carrier.height = static_cast<float>(height);
   const auto index = scene.rectangles.size();
   scene.add(carrier);
-  scene.rasters.push_back(Raster{index, width, height, bitmap.rgba, false, false, true});
+  Raster raster;
+  raster.carrier = index;
+  raster.width = width;
+  raster.height = height;
+  raster.rgba = bitmap.rgba;
+  raster.use_tint = false;
+  raster.pixel_snap = true;
+  scene.rasters.push_back(std::move(raster));
   if (animated) request_animation_continuation();
   return {static_cast<float>(width), static_cast<float>(height)};
 }

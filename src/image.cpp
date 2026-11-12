@@ -270,7 +270,12 @@ void push_fitted(Scene& scene, const Fitted& fitted, const Rectangle& style) {
   carrier.visible = false;
   const std::size_t carrier_index = scene.rectangles.size();
   scene.add(carrier);
-  scene.rasters.push_back(Raster{carrier_index, fitted.pixel_width, fitted.pixel_height, fitted.pixels});
+  Raster raster;
+  raster.carrier = carrier_index;
+  raster.width = fitted.pixel_width;
+  raster.height = fitted.pixel_height;
+  raster.rgba = fitted.pixels;
+  scene.rasters.push_back(std::move(raster));
 }
 
 // Fitted bitmaps by their pixels, fit and size: a capture redrawn on every

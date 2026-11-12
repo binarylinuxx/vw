@@ -517,9 +517,14 @@ std::pair<float, float> add_text(Scene& scene, std::string_view text,
   const std::size_t carrier_index = scene.rectangles.size();
   scene.add(carrier);
   if (clip_x == 0 && clip_y == 0) {
-    scene.rasters.push_back(Raster{carrier_index, bitmap->width, bitmap->height,
-                                   bitmap->pixels, bitmap->alpha_mask,
-                                   bitmap->alpha_mask, true});
+    Raster raster;
+    raster.carrier = carrier_index;
+    raster.width = bitmap->width;
+    raster.height = bitmap->height;
+    raster.rgba = bitmap->pixels;
+    raster.use_tint = raster.alpha_mask = bitmap->alpha_mask;
+    raster.pixel_snap = true;
+    scene.rasters.push_back(std::move(raster));
   } else {
     const std::size_t count = static_cast<std::size_t>(visible_width) * visible_height;
     std::vector<std::uint32_t> pixels(bitmap->alpha_mask ? (count + 3U) / 4U : count);
@@ -533,10 +538,14 @@ std::pair<float, float> add_text(Scene& scene, std::string_view text,
         } else pixels[dst] = (*bitmap->pixels)[src];
       }
     }
-    scene.rasters.push_back(Raster{carrier_index, visible_width, visible_height,
-                                   std::make_shared<const std::vector<std::uint32_t>>(std::move(pixels)),
-                                   bitmap->alpha_mask,
-                                   bitmap->alpha_mask, true});
+    Raster raster;
+    raster.carrier = carrier_index;
+    raster.width = visible_width;
+    raster.height = visible_height;
+    raster.rgba = std::make_shared<const std::vector<std::uint32_t>>(std::move(pixels));
+    raster.use_tint = raster.alpha_mask = bitmap->alpha_mask;
+    raster.pixel_snap = true;
+    scene.rasters.push_back(std::move(raster));
   }
   return {bitmap->metrics.width, bitmap->metrics.bottom - bitmap->metrics.top};
 }
