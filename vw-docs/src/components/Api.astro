@@ -1,0 +1,8 @@
+---
+// A compact signature list: <Api items={[['sig', 'what it does'], …]} />
+interface Props { items: [string, string][] }
+const { items } = Astro.props;
+---
+<div class="api">
+  {items.map(([signature, text]) => <div class="api-row"><code>{signature}</code><p set:html={text} /></div>)}
+</div>

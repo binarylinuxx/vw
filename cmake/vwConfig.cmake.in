@@ -1,0 +1,9 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(nlohmann_json)
+
+include("${CMAKE_CURRENT_LIST_DIR}/vwTargets.cmake")
+# vw_compile_shader(): GLSL to .vws with the installed vw::shaderc.
+include("${CMAKE_CURRENT_LIST_DIR}/VwShaders.cmake")
+check_required_components(vw)

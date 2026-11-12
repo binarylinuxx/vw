@@ -1,0 +1,54 @@
+---
+title: Examples
+description: Small, complete programs in examples/cpp — each one a single file you can read top to bottom and build on.
+---
+import { Example } from '../../components/index.ts';
+
+Every example is one C++ file that builds with vw (`-DVW_BUILD_EXAMPLES=ON`, the default) and runs on its own. Each one is short enough to copy into your project and change.
+
+```sh
+cmake -S . -B build -G Ninja && cmake --build build
+./build/vw-example-clock
+```
+
+## Desktop widgets
+
+<Example name="clock" title="Clock" shows={['Layer::bottom', 'click-through', 'refresh_interval']}>
+  A greeting, the time and the date on a translucent card in the top-left corner. It sits below windows, never takes input, and rebuilds once a second.
+</Example>
+
+<Example name="dock" title="Dock" shows={['vw::applications', 'themed icons', 'Hover']}>
+  Pinned applications along the bottom edge. The icons come from desktop entries and the icon theme, and a click launches the application.
+</Example>
+
+<Example name="calendar" title="Calendar" shows={['std::chrono', 'on_scroll', 'grid layout']}>
+  A month grid in the top-right corner. The arrows or the mouse wheel page through months, and today is highlighted.
+</Example>
+
+<Example name="bar" title="Bar" shows={['full-width surface', 'exclusive_zone', 'Hyprland events']}>
+  A full-width top bar with the active workspace, a clock and a launcher button. It rebuilds right away on Hyprland events.
+</Example>
+
+<Example name="status" title="Status bar" shows={['tray', 'network', 'bluetooth', 'upower', 'brightness']}>
+  The system services in one bar. Tray icons open their menus in a popup, the brightness changes on scroll, and a chip switches the power profile.
+</Example>
+
+## Overlays
+
+<Example name="launcher" title="Launcher" shows={['two surfaces', 'Keyboard::exclusive', 'listview']}>
+  A bar with a launcher popup, both driven by one app. The popup maps when opened, takes the keyboard and filters applications as you type.
+</Example>
+
+<Example name="power" title="Power menu" shows={['fill the output', 'Layer::overlay', 'keyboard']}>
+  Lock, log out, reboot or shut down from a dimmed fullscreen overlay. The arrows move the selection, and Escape or a click outside closes it.
+</Example>
+
+<Example name="calculator" title="Calculator" shows={['anchor::center', 'Keyboard::exclusive', 'grid layout']}>
+  A fixed-size calculator layer in the middle of the screen, so no tiling stretches it. Use the mouse or type: digits, operators, Enter, Backspace and Escape.
+</Example>
+
+## Window
+
+<Example name="tasks" title="Tasks" shows={['Ui::toplevel', 'text_field', 'listview', 'persistence']}>
+  A to-do list in an ordinary resizable window. Add tasks with Enter, then filter, tick off and delete them. They're saved in `$XDG_DATA_HOME`.
+</Example>

@@ -1,0 +1,21 @@
+#pragma once
+
+// The public C++ API of libvw.
+#include "vw/animation.hpp"
+#include "vw/app.hpp"
+#include "vw/applications.hpp"
+#include "vw/bluetooth.hpp"
+#include "vw/brightness.hpp"
+#include "vw/host.hpp"
+#include "vw/hyprland.hpp"
+#include "vw/ipc.hpp"
+#include "vw/mpris.hpp"
+#include "vw/network.hpp"
+#include "vw/notifications.hpp"
+#include "vw/pipewire.hpp"
+#include "vw/process.hpp"
+#include "vw/scene.hpp"
+#include "vw/tray.hpp"
+#include "vw/ui.hpp"
+#include "vw/upower.hpp"
+#include "vw/zwwm.hpp"

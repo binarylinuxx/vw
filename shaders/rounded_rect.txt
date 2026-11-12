@@ -1,0 +1,60 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(rgba8, set = 0, binding = 0) uniform image2D target_image;
+
+layout(push_constant) uniform Rectangle {
+  vec4 bounds;
+  vec4 params;
+  vec4 color;
+  vec4 color2;
+  vec4 border_color;
+  vec4 clip;
+  vec4 clip_params;
+} rectangle;
+
+float rounded_box_distance(vec2 point, vec2 half_size, float radius) {
+  vec2 edge = abs(point) - (half_size - vec2(radius));
+  return length(max(edge, vec2(0.0))) + min(max(edge.x, edge.y), 0.0) - radius;
+}
+
+void main() {
+  ivec2 local = ivec2(gl_GlobalInvocationID.xy);
+  ivec2 size = ivec2(ceil(rectangle.bounds.zw));
+  if (any(greaterThanEqual(local, size))) return;
+
+  vec2 point = vec2(local) + vec2(0.5);
+  vec2 half_size = rectangle.bounds.zw * 0.5;
+  float radius = rectangle.params.x;
+  float border_width = rectangle.params.y;
+  float outer = rectangle.params.w == 1.0 ? 1.0 :
+      1.0 - smoothstep(-0.5, 0.5,
+          rounded_box_distance(point - half_size, half_size, radius));
+  vec2 inner_half = max(half_size - vec2(border_width), vec2(0.0));
+  float inner_radius = max(radius - border_width, 0.0);
+  float inner = rectangle.params.w == 1.0 || border_width <= 0.0 ? outer :
+      1.0 - smoothstep(-0.5, 0.5,
+          rounded_box_distance(point - half_size, inner_half, inner_radius));
+
+  ivec2 destination = ivec2(rectangle.bounds.xy) + local;
+  if (rectangle.clip.z > 0.0 && rectangle.clip.w > 0.0) {
+    vec2 clip_point = vec2(destination) + vec2(0.5) - rectangle.clip.xy;
+    vec2 clip_half = rectangle.clip.zw * 0.5;
+    if (rounded_box_distance(clip_point - clip_half, clip_half,
+                             rectangle.clip_params.x) > 0.0) return;
+  }
+  float gradient_position = rectangle.params.z == 1.0
+      ? point.x / rectangle.bounds.z
+      : rectangle.params.z == 2.0 ? point.y / rectangle.bounds.w : 0.0;
+  vec4 fill_color = mix(rectangle.color, rectangle.color2, gradient_position);
+  float fill_alpha = fill_color.a * inner;
+  float border_alpha = border_width > 0.0
+      ? rectangle.border_color.a * outer * (1.0 - fill_alpha)
+      : 0.0;
+  vec4 source = vec4(fill_color.rgb * fill_alpha +
+                         rectangle.border_color.rgb * border_alpha,
+                     fill_alpha + border_alpha);
+  vec4 current = imageLoad(target_image, destination);
+  imageStore(target_image, destination,
+             source + current * (1.0 - source.a));
+}

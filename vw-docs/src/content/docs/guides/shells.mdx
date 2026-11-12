@@ -1,0 +1,64 @@
+---
+title: Shells and layer surfaces
+description: Bars, docks, sidebars and popups are layer surfaces — anchored to output edges, stacked in layers, reserving space and choosing what may be clicked.
+---
+import { Callout } from '../../../components/index.ts';
+
+Calling `ui.surface(props)` in a build function makes that surface a layer surface. vw speaks `wlr-layer-shell-v1`, and zwwm's native layer shell when it is available.
+
+## Anchor, size, reserve
+
+```cpp
+const vw::Size output = vw::surface_size();  // {0, 0} until the first configure
+ui.surface({.width = 0,                       // 0: fill the width, compositor decides
+            .height = 40,
+            .anchor = vw::anchor::top,
+            .layer = vw::Layer::top,
+            .exclusive_zone = 40,             // windows keep clear of these 40 px
+            .surface_namespace = "my-bar"});
+```
+
+- **Size.** Leave `width`/`height` unset to size the surface to what you drew. `0` stretches it along that axis (both edges get anchored) and the compositor picks the size; read it back with `vw::surface_size()` and lay out against it.
+- **Anchor** is a bit set: `top`, `bottom`, `left`, `right`, the corners, or `fill`.
+- **Layer**: `background`, `bottom`, `top`, `overlay`.
+- **Margin** is `{top, right, bottom, left}` from the anchored edges.
+- **Exclusive zone** reserves space from the anchored edge. It can be smaller than the surface, so a bar can grow a panel without pushing windows around; `-1` ignores other surfaces' zones entirely (wallpapers, fullscreen overlays).
+- **Namespace** is what compositor layer rules match (blur, animations).
+
+## Click-through
+
+`input_regions` lists the rectangles (`{x, y, width, height}`) that accept the pointer. Anything outside passes through to windows below. An empty list makes the whole surface click-through; leaving it unset accepts input everywhere.
+
+```cpp
+std::vector<std::array<std::int32_t, 4>> input = {{0, 0, (int)output.width, 40}};
+if (panel_open) input.push_back({x, 40, 360, 480});
+ui.surface({.width = 0, .height = 0, .anchor = vw::anchor::fill, .exclusive_zone = -1,
+            .input_regions = std::move(input)});
+```
+
+This is how a single fullscreen surface can draw a frame, a bar and sliding panels while the middle of the screen stays usable.
+
+## Keyboard
+
+Layer surfaces only get keys when they ask. `ui.keyboard(handler, mode)` installs a key handler and picks the request:
+
+| Mode | Meaning |
+| --- | --- |
+| `automatic` | `on_demand` when the scene has a text field or key handler, else `none` |
+| `none` | never takes keys |
+| `on_demand` | takes focus when clicked, like a window |
+| `exclusive` | grabs the keyboard while mapped (launchers, menus) |
+
+The handler sees every key first and returns `true` when it handled one; anything else goes to the focused text field.
+
+## Popups that close on outside clicks
+
+With zwwm, `focus_grab = true` asks the compositor to tell you when the user clicks elsewhere. `on_dismiss` receives a `FocusEvent` whose `reason()` is `outside`, `unmapped`, `replaced`, `locked` or `released`; close your popup there.
+
+## Coming and going
+
+A build that draws nothing leaves its surface unmapped until a later build draws again. Gate a launcher on your own `bool open`; the surface appears and disappears with it. Several `app.surface(...)` calls give you several surfaces in one loop.
+
+<Callout type="tip" title="Static surfaces">
+Set `refresh_interval` high (up to 3600 s) on surfaces that only change on events — edge reservations, docks — so the loop never rebuilds them on a timer.
+</Callout>

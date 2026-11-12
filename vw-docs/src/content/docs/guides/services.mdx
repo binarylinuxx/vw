@@ -1,0 +1,42 @@
+---
+title: Services and events
+description: Every system service is a background thread with a cached snapshot and an event fd. Register the fd once and your surfaces rebuild only when something changed.
+---
+import { Callout } from '../../../components/index.ts';
+
+```cpp
+vw::App app;
+app.surface(bar).surface(sidebar);
+app.on_event(vw::network::event_fd(), vw::network::drain_events)
+   .on_event(vw::bluetooth::event_fd(), vw::bluetooth::drain_events)
+   .on_event(vw::upower::event_fd(), vw::upower::drain_events)
+   .on_event(vw::pipewire::event_fd(), vw::pipewire::drain_events)
+   .on_event(vw::mpris::event_fd(), vw::mpris::drain_events)
+   .on_event(vw::notifications::event_fd(), vw::notifications::drain_events);
+```
+
+## The pattern
+
+Each service runs on its own thread: a GLib main loop for the D-Bus ones (NetworkManager, BlueZ, UPower, MPRIS, the tray, notifications), PipeWire's own loop, inotify for backlights, sockets for compositors. When its state changes it refreshes a snapshot and makes its event fd readable.
+
+- **Reads are cheap.** `vw::network::status()`, `vw::mpris::active()`, `vw::upower::display_device()` return the cached snapshot; they never block on the bus. Call them from build functions freely.
+- **Writes are calls.** `set_wifi_enabled`, `set_volume`, `play_pause`, `set_powered` talk to the service and return whether it worked; the change comes back as an event.
+- **Events are coalesced.** `drain_events()` empties the fd and returns `true` if anything happened; the app then rebuilds every surface once.
+
+Your own sources plug in the same way: any fd plus a function that drains it and says whether to rebuild — a signalfd, an inotify watch, a timerfd.
+
+```cpp
+app.on_event(signal_fd, [] { /* read siginfo */ return true; });
+```
+
+<Callout type="note">
+A negative fd (a service that is not available on this system) is ignored, so registering everything unconditionally is fine.
+</Callout>
+
+## Where to go next
+
+- [Notifications](/services/notifications/) — vw is the daemon.
+- [Media and audio](/services/media/) — MPRIS players and PipeWire nodes.
+- [Network, Bluetooth, power](/services/system/) — NetworkManager, BlueZ, UPower, backlights.
+- [Apps and tray](/services/desktop/) — desktop entries and StatusNotifierItems.
+- [Compositors](/services/compositors/) — zwwm and Hyprland.

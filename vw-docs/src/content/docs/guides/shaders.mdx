@@ -1,0 +1,88 @@
+---
+title: Custom shaders
+description: Any rectangle can be drawn by your own compute shader. vw compiles it into .vws — SPIR-V plus what vw needs to know — and only pays for what the shader declares.
+---
+import { Callout } from '../../../components/index.ts';
+
+## Write one
+
+```glsl
+#version 450
+// @vw name: Frosted tint
+// @vw params: strength
+#define VW_USE_BACKDROP          // this shader samples what was drawn before it
+#include <vw/shader.glsl>
+
+void main() {
+  ivec2 pixel; vec2 local;
+  if (!vw_begin(pixel, local)) return;   // outside the rectangle, surface or clip
+  float d = vw_rounded_box(local - vw_size() * 0.5, vw_size() * 0.5, vw_radius());
+  vec4 behind = vw_backdrop(pixel);
+  vw_blend(pixel, vw_premultiply(mix(behind, vw.color, vw_param(0)), vw_coverage(d)));
+}
+```
+
+`vw/shader.glsl` declares vw's interface and a few helpers, so a shader is only its own idea.
+
+## Compile it
+
+```sh
+vw-shaderc tint.comp -o tint.vws
+vw-shaderc --inspect tint.vws
+```
+
+`vw-shaderc` runs `glslc` (from `$VW_GLSLC` or `PATH`), checks the module against vw's contract — a `main` entry point, 8×8×1 workgroups, only bindings 0–2 of set 0 — and writes a `.vws` file. Mistakes are reported at build time instead of as a blank rectangle at runtime.
+
+In CMake, the installed package provides a function, and tracks `#include`s:
+
+```cmake
+find_package(vw REQUIRED)
+vw_compile_shader(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tint.vws SOURCE shaders/tint.comp)
+add_custom_target(shaders ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/tint.vws)
+```
+
+## Use it
+
+```cpp
+ui.rectangle({.width = 420, .height = 220, .radius = 32, .color = vw::rgba(0x1b2732c0),
+              .shader = "/path/to/tint.vws", .shader_params = {0.4f}});
+```
+
+The pipeline is cached by path and modification time: recompile while the program runs and the next frame uses the new shader. Plain `.spv` files still load, but vw then has to assume they read everything.
+
+## The .vws format
+
+A `.vws` file is little-endian:
+
+| Bytes | Field |
+| --- | --- |
+| 4 | magic `VWS1` |
+| 2 | format version (1) |
+| 2 | flags: bit 0 reads the backdrop, bit 1 reads `shader_data` |
+| 4 | SPIR-V length in words |
+| 4 | CRC-32 of the SPIR-V |
+| 1 + n | name |
+| 1 + … | parameter count (≤ 4), then each name as 1 + n bytes |
+| 0–3 | padding to 4 bytes |
+| 4 × words | SPIR-V |
+
+The flags are derived from the bindings the compiled module declares, never typed by hand. The checksum catches truncated or corrupt files with a clear error. vw's own shaders are compiled the same way and embedded in the library, so nothing is searched for at runtime; `VW_SHADER_DIR` can point at newer `rounded_rect.vws`/`raster.vws` while you work on them.
+
+## What vw provides
+
+| Name | What |
+| --- | --- |
+| `vw_target` | binding 0, the surface (`rgba8`, premultiplied) |
+| `vw.bounds`, `vw.params`, `vw.color`, `vw.color2`, `vw.border_color`, `vw.clip`, `vw.clip_params`, `vw.shader_params` | the rectangle (push constants) |
+| `vw_begin(out pixel, out local)` | this invocation's pixel; false outside the rectangle, surface or parent clip |
+| `vw_size()`, `vw_radius()`, `vw_param(i)` | shorthands |
+| `vw_rounded_box(p, half, r)`, `vw_coverage(d)` | signed distance and anti-aliased coverage |
+| `vw_blend(pixel, premultiplied)`, `vw_premultiply(color, amount)` | compositing |
+| `vw_data(i)`, `vw_data_length()` | `shader_data`, with `VW_USE_DATA` |
+| `vw_backdrop(pixel)` | what was drawn before, with `VW_USE_BACKDROP` |
+
+<Callout type="tip" title="Only ask for the backdrop when you sample it">
+The backdrop is a copy of the whole surface made just before your rectangle draws. Without `VW_USE_BACKDROP` the shader never declares it, the `.vws` says so, and vw skips the copy — for a shell drawn with one big shader, that is a full-surface copy saved every frame.
+</Callout>
+
+The backdrop holds everything drawn earlier in the same surface — rectangles, text and images in scene order — but never the desktop or other windows: a client cannot see behind itself.

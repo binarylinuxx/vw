@@ -1,0 +1,63 @@
+---
+title: Your first surface
+description: A clock pinned to the top of the screen, then made interactive, then made to react to a service — in about forty lines of C++.
+---
+import { Callout } from '../../../components/index.ts';
+
+## A surface is a function
+
+```cpp
+#include <vw/vw.hpp>
+#include <chrono>
+#include <format>
+
+int main() {
+  vw::App app([](vw::Ui& ui) {
+    const auto now = std::chrono::zoned_time{std::chrono::current_zone(),
+                                             std::chrono::system_clock::now()};
+    ui.rectangle({.width = 160, .height = 48, .radius = 24, .color = vw::rgb(0x263b4d)});
+    ui.text({.text = std::format("{:%H:%M}", now), .font = "sans", .size = 18,
+             .weight = vw::weight::semibold, .color = vw::rgb(0xd2e5ff),
+             .place = {.x = 54, .y = 13}});
+    ui.surface({.anchor = vw::anchor::top, .margin = {10, 0, 0, 0}, .refresh_interval = 1});
+  });
+  return app.run();
+}
+```
+
+Link it against `vw::vw` and run it under a Wayland compositor with layer-shell. The function runs whenever the surface needs a new scene: here, once a second because of `refresh_interval`, and whenever input arrives. Unchanged scenes are compared and not rendered again, so a clock that has not ticked over costs a build, not a frame.
+
+`ui.surface` makes it a layer surface: anchored to the top edge, 10 px below it. Without a size, the surface is as big as what you drew.
+
+## Make it respond
+
+Widgets take an `input` block. State that must live across builds lives outside the function:
+
+```cpp
+bool expanded = false;
+vw::App app([&](vw::Ui& ui) {
+  const float width = static_cast<float>(vw::animate("pill.width", expanded ? 280 : 160,
+      {.duration = 0.4, .easing = vw::Easing::out_back}));
+  ui.rectangle({.width = width, .height = 48, .radius = 24, .color = vw::rgb(0x263b4d),
+                .input = {.on_click = [&](const vw::ClickEvent&) { expanded = !expanded; },
+                          .hover = vw::Hover{.color = vw::rgb(0x2f4a60)}}});
+  // ...
+});
+```
+
+`vw::animate` is a tween keyed by id: it returns where the value is now, and keeps frames coming until it arrives. Frames are paced by the compositor's frame callbacks, so an animation never runs faster than the display, and stops costing anything once it settles.
+
+## React to the system
+
+Every service exposes an event fd. Give it to the app and the surface rebuilds when it fires:
+
+```cpp
+app.on_event(vw::pipewire::event_fd(), vw::pipewire::drain_events);
+// in the build function:
+if (const auto sink = vw::pipewire::default_sink())
+  ui.text({.text = std::format("{:.0f}%", sink->volume() * 100), /* ... */});
+```
+
+<Callout type="tip" title="Several surfaces, one loop">
+Call `app.surface(...)` again for each surface: a bar, a launcher that only draws when it is open, a lock screen. A build that draws nothing leaves its surface unmapped, which is how popups come and go.
+</Callout>

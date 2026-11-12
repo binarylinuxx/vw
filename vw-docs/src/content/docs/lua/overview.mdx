@@ -1,0 +1,36 @@
+---
+title: Lua configs
+description: The vw executable runs a Lua file as a build function and reloads it when you save. It is deprecated in favour of the C++ API, but still maintained.
+---
+import { Callout } from '../../../components/index.ts';
+
+<Callout type="warn" title="Deprecated">
+New programs should link libvw and use `vw::App`. The `vw` executable prints a notice on start; set `VW_NO_DEPRECATION_WARNING=1` to silence it.
+</Callout>
+
+```lua
+-- init.lua
+local base = require("vw.base")
+local surface = require("vw.surface")
+local datetime = require("vw.datetime")
+
+base.rectangle({ width = 160, height = 48, radius = 24, color = { 0.15, 0.23, 0.3, 1 } })
+base.text({ text = datetime.format("%H:%M"), font = "sans", size = 18,
+            color = { 0.82, 0.9, 1, 1 }, x = 54, y = 13 })
+surface.set({ anchor = "top", margin = { 10, 0, 0, 0 } })
+```
+
+```sh
+vw -c init.lua            # run it
+vw --check -c init.lua    # build once and report errors, no Wayland needed
+```
+
+## How it runs
+
+The whole file is the build function: it runs again on input, on events and every `refresh_interval`. Saving the file — or any `.lua`/`.js` file next to it — reloads it; SIGHUP forces a reload. An error keeps the last good scene on screen and prints where it happened.
+
+Widgets mirror the C++ props with snake_case keys; colours are `{ r, g, b, a }` in 0–1, and `x`/`y` sit directly in the table instead of under `place`. State that must survive rebuilds belongs in module-level variables or `vw.animation`.
+
+## Hot-reload friendly state
+
+Module tables are re-created on reload, so keep long-lived state in globals you guard (`state = state or {}`), or in vw itself: text fields, scroll offsets and tweens are keyed by id and survive reloads.

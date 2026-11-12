@@ -1,0 +1,49 @@
+---
+// One example: screenshot (public/examples/<name>.png), what it shows, and
+// how to run it. Missing screenshots render as a labelled placeholder.
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+interface Props { name: string; title: string; shows?: string[] }
+const { name, title, shows = [] } = Astro.props;
+const base = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
+const image = `examples/${name}.png`;
+const hasImage = existsSync(fileURLToPath(new URL(`../../public/${image}`, import.meta.url)));
+---
+<article class="example" id={name}>
+  {hasImage
+    ? <img src={`${base}${image}`} alt={`vw-example-${name}: ${title}`} loading="lazy" />
+    : <div class="example-placeholder">public/{image}</div>}
+  <div class="example-body">
+    <h3>{title}</h3>
+    <slot />
+    {shows.length > 0 && <ul class="example-shows">{shows.map((item) => <li>{item}</li>)}</ul>}
+    <code class="example-run">./build/vw-example-{name}</code>
+    <span class="example-source">examples/cpp/{name}.cpp</span>
+  </div>
+</article>
+
+<style>
+  .example {
+    display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 20px;
+    padding: 16px; margin: 20px 0; border-radius: var(--r-l); background: var(--surface-1);
+  }
+  .example img, .example-placeholder {
+    width: 100%; border-radius: var(--r-m); background: #11111b; display: block;
+  }
+  .example-placeholder {
+    aspect-ratio: 4 / 3; display: grid; place-items: center;
+    color: var(--on-surface-variant); font: 13px var(--mono);
+  }
+  .example-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .example-body h3 { margin: 0; }
+  .example-body :global(p) { margin: 0; color: var(--on-surface-variant); }
+  .example-shows { display: flex; flex-wrap: wrap; gap: 6px; padding: 0; margin: 4px 0; list-style: none; }
+  .example-shows li {
+    padding: 4px 10px; border-radius: var(--r-full); background: var(--surface-3);
+    font: 12px var(--mono); color: var(--on-surface);
+  }
+  .example-run { margin-top: auto; overflow-wrap: anywhere; }
+  .example-source { font: 12px var(--mono); color: var(--on-surface-variant); }
+  @media (max-width: 760px) { .example { grid-template-columns: 1fr; } }
+</style>

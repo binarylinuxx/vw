@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - name: Build (clang, examples included)
+        run: |
+          nix develop --command cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          nix develop --command cmake --build build
+      - name: Nix package
+        run: nix build --print-build-logs
+
+  docs:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vw-docs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: bun run check:links

@@ -1,0 +1,31 @@
+---
+// <Tabs labels={['C++', 'Lua']}><div>…</div><div>…</div></Tabs>
+// Children are panels in label order. The chosen label is remembered.
+interface Props { labels: string[] }
+const { labels } = Astro.props;
+---
+<div class="tabs" data-labels={labels.join('|')}>
+  <div class="tab-list" role="tablist">
+    {labels.map((label, i) => <button type="button" role="tab" aria-selected={i === 0 ? 'true' : 'false'} data-tab={label}>{label}</button>)}
+  </div>
+  <slot />
+</div>
+<script>
+  const KEY = 'vw-docs-tab';
+  function apply(root: Element, label: string) {
+    const labels = (root as HTMLElement).dataset.labels!.split('|');
+    const index = Math.max(0, labels.indexOf(label));
+    root.querySelectorAll<HTMLButtonElement>('[role=tab]').forEach((b, i) => b.setAttribute('aria-selected', String(i === index)));
+    [...root.children].slice(1).forEach((panel, i) => { (panel as HTMLElement).hidden = i !== index; panel.classList.add('tab-panel'); });
+  }
+  let saved = '';
+  try { saved = localStorage.getItem(KEY) || ''; } catch {}
+  document.querySelectorAll('.tabs').forEach((root) => {
+    apply(root, saved);
+    root.querySelectorAll<HTMLButtonElement>('[role=tab]').forEach((button) => button.addEventListener('click', () => {
+      const label = button.dataset.tab!;
+      try { localStorage.setItem(KEY, label); } catch {}
+      document.querySelectorAll('.tabs').forEach((other) => apply(other, label));
+    }));
+  });
+</script>

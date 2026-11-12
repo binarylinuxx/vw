@@ -1,0 +1,52 @@
+---
+title: Motion and gestures
+description: Tweens keyed by id, springs and Béziers, hover transitions and captured drags — all paced by the compositor's frame callbacks.
+---
+import { Callout } from '../../../components/index.ts';
+
+## Tweens
+
+```cpp
+const double x = vw::animate("panel.x", open ? 0 : -320,
+                             {.duration = 0.45, .easing = vw::Easing::out_expo});
+```
+
+`vw::animate(id, target, options)` returns the current value and moves towards `target`. Change the target mid-flight and it continues from where it is. While any tween is moving, the build reports `animating` and the surface keeps receiving frames; once all settle, frames stop.
+
+| Option | Meaning |
+| --- | --- |
+| `duration` | seconds; `0` snaps (useful while a finger drags) |
+| `initial` | starting value the first time the id is seen — `initial = 0` makes things grow in |
+| `easing` | `linear`, `in_out_cubic`, `out_cubic`, `out_quint`, `out_expo`, `out_back`, `bezier`, `spring` |
+| `bezier` | control points `{x1, y1, x2, y2}` for `Easing::bezier` |
+| `mass`, `stiffness`, `damping` | for `Easing::spring`, which keeps velocity across retargets |
+| `min`, `max` | clamp the value |
+
+A new id per occurrence restarts an animation: an entrance that should play every time a lock screen appears can use `std::format("lock.intro.{}", count)`.
+
+For effects that are not tweens — a pulse, a shake — call `vw::request_animation_continuation()` to get another frame.
+
+## Hover
+
+`input.hover = vw::Hover{.color = …, .scale = 1.02, .duration = 0.16}` tints and scales a widget while the pointer is over it, without rebuilding. `input.on_hover(bool inside)` tells you about entering and leaving even when something is drawn on top, and the scene rebuilds afterwards — the way to open hover popouts.
+
+## Drags
+
+```cpp
+.input = {
+  .on_drag_start = [&](const vw::DragEvent&) { dragging = true; },
+  .on_drag = [&](const vw::DragEvent& d) { offset = d.x - d.start_x; },
+  .on_drag_end = [&](const vw::DragEvent& d) {
+    dragging = false;
+    if (!d.cancelled && std::abs(offset) > width * 0.3) dismiss();
+    offset = 0;
+  }}
+```
+
+A drag captures the pointer from the press until release, even when it leaves the widget or the scene is rebuilt underneath it. Events carry `x`, `y`, `start_x`, `start_y`, `dx`, `dy` (since the last event), `button` and `cancelled` (Escape cancels while the surface has focus). `drag_button` selects the mouse button (BTN_LEFT by default).
+
+Drag rebuilds are coalesced onto frame callbacks, at most one per frame (and at least every 33 ms when the compositor sends none).
+
+<Callout type="tip" title="Follow, then settle">
+While dragging, feed the pointer straight through with `duration = 0`; on release switch to a spring or `out_back` towards the resting position. The tween picks up from wherever the finger left it.
+</Callout>

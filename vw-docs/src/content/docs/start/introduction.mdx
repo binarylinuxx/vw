@@ -1,0 +1,29 @@
+---
+title: What vw is
+description: A toolkit for the parts of a Wayland desktop that are not the compositor — bars, panels, popups, lock screens and plain windows — drawn with Vulkan compute.
+---
+import { Callout } from '../../../components/index.ts';
+
+vw is a C++23 library, `libvw`, plus an optional Lua frontend. You write a **build function** that describes a surface from scratch; vw turns it into a scene, renders it on the GPU and hands it to the compositor. It runs one event loop for any number of surfaces and wakes it from input, service events and timers — never from polling.
+
+## What you build with it
+
+- **Shell surfaces** through `wlr-layer-shell` (or zwwm's native layer shell): bars, docks, sidebars, notification popups, on-screen displays, wallpapers.
+- **Application windows** through `xdg-toplevel`, with text fields, lists and the clipboard.
+- **Lock screens** through `ext-session-lock-v1`, one surface per output, with PAM authentication built in.
+
+## What makes it different
+
+**Immediate mode, retained where it matters.** A build function runs again after input, after an event source fires and on the surface's refresh interval. There is no widget tree to keep in sync. Anything that must outlive a rebuild — text field contents, scroll offsets, tweens, hover state — is keyed by an id and kept for you.
+
+**A GPU rasteriser of its own.** Rectangles with per-corner radii, borders and gradients, shaped text (Pango and HarfBuzz), images with tint, hue and polygon masks, and your own SPIR-V compute shaders are all drawn by Vulkan compute into a linear dma-buf. Unchanged scenes are not rendered again.
+
+**Services as event sources.** Notifications (vw is the daemon), MPRIS, PipeWire, NetworkManager, BlueZ, UPower, backlights, the system tray, Hyprland and zwwm each expose an event fd. Hand it to the loop and your surfaces rebuild only when something changed.
+
+<Callout type="note" title="C++ first">
+The Lua frontend (the `vw` executable) still works and hot-reloads, but it is deprecated: new code should link `libvw` and use `vw::App`. Everything in these docs is C++ unless a page says otherwise.
+</Callout>
+
+## What it is not
+
+vw is not a compositor and does not manage windows. It is not a retained widget toolkit like GTK or Qt either: there are no widget objects to hold on to, and layout is something you do in your build function, with `row`, `column`, `stack`, `anchor_layout` and `listview` helping.

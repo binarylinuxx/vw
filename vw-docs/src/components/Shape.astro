@@ -1,0 +1,8 @@
+---
+import { lobed } from './shape';
+interface Props { lobes?: number; depth?: number; class?: string; rotation?: number; label?: string }
+const { lobes = 9, depth = 0.07, class: className, rotation = 0, label } = Astro.props;
+---
+<svg class={className} viewBox="0 0 100 100" role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : 'true'}>
+  <path d={lobed(lobes, depth, 100, rotation)} fill="currentColor" />
+</svg>

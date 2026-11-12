@@ -1,0 +1,46 @@
+name: Deploy docs
+
+# Publishes vw-docs to GitHub Pages at https://vw.zapzig.org
+# (vw-docs/public/CNAME). Point a CNAME record for vw.zapzig.org at
+# <owner>.github.io and set Settings → Pages → Source to "GitHub Actions".
+
+on:
+  push:
+    branches: [main]
+    paths: ['vw-docs/**', '.github/workflows/docs.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vw-docs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+        env:
+          DOCS_SITE: https://vw.zapzig.org
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: vw-docs/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: https://vw.zapzig.org
+    steps:
+      - uses: actions/deploy-pages@v4

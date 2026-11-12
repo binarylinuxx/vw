@@ -1,0 +1,160 @@
+---
+import Search from '../components/Search.astro';
+import Icon from '../components/Icon.astro';
+import Shape from '../components/Shape.astro';
+import { navigation, allPages, pageUrl, sectionOf } from '../data/navigation';
+import '../styles/docs.css';
+
+interface Props {
+  title: string;
+  description: string;
+  slug: string;
+  headings?: { depth: number; slug: string; text: string }[];
+  home?: boolean;
+}
+const { title, description, slug, headings = [], home = false } = Astro.props;
+const section = sectionOf(slug);
+const position = allPages.findIndex((page) => page.slug === slug);
+const previous = position > 0 ? allPages[position - 1] : null;
+const next = position >= 0 && position < allPages.length - 1 ? allPages[position + 1] : null;
+const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
+const canonical = Astro.site ? new URL(Astro.url.pathname, Astro.site) : undefined;
+---
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>{home ? 'vw — widgets for Wayland, drawn on the GPU' : `${title} — vw`}</title>
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#0c1014" />
+    {canonical && <link rel="canonical" href={canonical} />}
+    <link rel="icon" href={`${import.meta.env.BASE_URL}favicon.svg`} type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Roboto+Flex:opsz,wdth,wght@8..144,25..151,300..900&display=swap" />
+    <script is:inline>
+      try {
+        const saved = localStorage.getItem('vw-docs-theme');
+        document.documentElement.dataset.theme = saved || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+      } catch {}
+    </script>
+  </head>
+  <body>
+    <a class="skip" href="#content">Skip to content</a>
+
+    <header class="topbar">
+      <a class="brand" href={pageUrl('')} aria-label="vw home">
+        <Shape class="brand-shape" lobes={7} depth={0.09} />
+        <span class="brand-name">vw</span>
+      </a>
+      <span class="topbar-crumb">{home ? 'Wayland × Vulkan' : section?.label}</span>
+    </header>
+
+    <div class:list={['frame', { 'is-home': home }]}>
+      <aside class="drawer" id="drawer" aria-label="Documentation">
+        <div class="drawer-head">
+          <a class="brand" href={pageUrl('')} aria-label="vw home">
+            <Shape class="brand-shape" lobes={7} depth={0.09} />
+            <span><span class="brand-name">vw</span><span class="brand-sub">Wayland widgets on Vulkan</span></span>
+          </a>
+        </div>
+        <button class="search-pill" type="button" data-search-open>
+          <Icon name="search" /><span>Search</span><kbd>Ctrl K</kbd>
+        </button>
+        <nav class="nav">
+          {navigation.map((group) => (
+            <div class="nav-section">
+              <p class="nav-title"><Icon name={group.icon} />{group.label}</p>
+              <ul>
+                {group.items.map((page) => (
+                  <li><a href={pageUrl(page.slug)} aria-current={page.slug === slug ? 'page' : undefined}>{page.label}</a></li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </nav>
+        <div class="drawer-foot">
+          <span>libvw 0.1 · C++23 · Lua</span>
+          <button class="icon-btn theme-btn" type="button" data-theme-toggle aria-label="Switch light or dark">
+            <Icon name="sun" class="sun" /><Icon name="moon" class="moon" />
+          </button>
+        </div>
+      </aside>
+      <button class="scrim" type="button" data-nav-close aria-label="Close menu" tabindex="-1"></button>
+
+      <main class="sheet" id="content">
+        {home ? <slot /> : (
+          <>
+            <div class="crumb">
+              {section && <span class="chip tonal">{section.label}</span>}
+            </div>
+            <h1 class="page-title">{title}</h1>
+            {description && <p class="page-lede">{description}</p>}
+            <article class="prose"><slot /></article>
+            {(previous || next) && (
+              <nav class="pager" aria-label="Previous and next">
+                {previous && <a href={pageUrl(previous.slug)}><small>Previous</small><strong>{previous.label}</strong></a>}
+                {next && <a class="next" href={pageUrl(next.slug)}><small>Next</small><strong>{next.label}</strong></a>}
+              </nav>
+            )}
+          </>
+        )}
+      </main>
+
+      {!home && (
+        <aside class="toc-rail" aria-label="On this page">
+          {toc.length > 0 && (
+            <nav class="toc">
+              <h2>On this page</h2>
+              <ul>{toc.map((h) => <li><a class={`depth-${h.depth}`} href={`#${h.slug}`} data-toc>{h.text}</a></li>)}</ul>
+            </nav>
+          )}
+        </aside>
+      )}
+    </div>
+
+    <nav class="bottombar" aria-label="Quick actions">
+      <button type="button" class="primary" data-nav-open aria-controls="drawer"><Icon name="menu" />Index</button>
+      <button type="button" data-search-open aria-label="Search"><Icon name="search" /></button>
+      <button type="button" class="theme-btn" data-theme-toggle aria-label="Switch light or dark"><Icon name="sun" class="sun" /><Icon name="moon" class="moon" /></button>
+    </nav>
+
+    <Search />
+
+    <script>
+      const root = document.documentElement;
+      document.querySelectorAll('[data-theme-toggle]').forEach((b) => b.addEventListener('click', () => {
+        const theme = root.dataset.theme === 'light' ? 'dark' : 'light';
+        root.dataset.theme = theme;
+        try { localStorage.setItem('vw-docs-theme', theme); } catch {}
+      }));
+
+      const body = document.body;
+      document.querySelectorAll('[data-nav-open]').forEach((b) => b.addEventListener('click', () => body.classList.add('nav-open')));
+      document.querySelectorAll('[data-nav-close]').forEach((b) => b.addEventListener('click', () => body.classList.remove('nav-open')));
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') body.classList.remove('nav-open'); });
+      // Swipe the sheet down to close it.
+      const drawer = document.querySelector<HTMLElement>('#drawer')!;
+      let startY = 0;
+      drawer.addEventListener('touchstart', (e) => { startY = e.touches[0].clientY; }, { passive: true });
+      drawer.addEventListener('touchend', (e) => {
+        const nav = drawer.querySelector('.nav')!;
+        if (e.changedTouches[0].clientY - startY > 80 && nav.scrollTop <= 0) body.classList.remove('nav-open');
+      });
+
+      // Highlight the section in view.
+      const links = [...document.querySelectorAll<HTMLAnchorElement>('[data-toc]')];
+      if (links.length) {
+        const targets = links.map((a) => document.getElementById(decodeURIComponent(a.hash.slice(1)))).filter(Boolean) as HTMLElement[];
+        const mark = () => {
+          let current = targets[0];
+          for (const t of targets) if (t.getBoundingClientRect().top < 140) current = t;
+          links.forEach((a) => a.classList.toggle('is-active', a.hash.slice(1) === current?.id));
+        };
+        addEventListener('scroll', mark, { passive: true });
+        mark();
+      }
+    </script>
+  </body>
+</html>

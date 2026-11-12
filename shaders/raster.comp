@@ -1,0 +1,145 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(rgba8, set = 0, binding = 0) uniform image2D target_image;
+layout(std430, set = 0, binding = 1) readonly buffer Pixels { uint pixels[]; } source;
+
+layout(push_constant) uniform Raster {
+  vec4 bounds;
+  vec4 source_info;
+  vec4 tint;
+  vec4 clip;
+  vec4 params;
+  vec4 effect;    // saturation, hue rotation in radians, colorize amount, mask points
+  vec4 colorize;  // colour, and where the mask starts in the pixel buffer
+} raster;
+
+const vec3 luma_weights = vec3(0.2126, 0.7152, 0.0722);
+
+// Rotates around the grey axis of the RGB cube, which keeps lightness.
+vec3 rotate_hue(vec3 color, float angle) {
+  const vec3 axis = vec3(0.57735027);
+  float cosine = cos(angle);
+  return color * cosine + cross(axis, color) * sin(angle) + axis * dot(axis, color) * (1.0 - cosine);
+}
+
+// Maps luminance onto black, the colour, then a little towards white: shading
+// survives, and pure white stays clearly tinted (for symbolic icons).
+vec3 colorize(vec3 color, vec3 target) {
+  float luma = dot(color, luma_weights);
+  const float pivot = 0.6;
+  const float highlight = 0.35;
+  if (luma < pivot) return target * (luma / pivot);
+  return mix(target, vec3(1.0), (luma - pivot) / (1.0 - pivot) * highlight);
+}
+
+vec3 apply_effects(vec3 color) {
+  if (raster.effect.x != 1.0) color = mix(vec3(dot(color, luma_weights)), color, raster.effect.x);
+  if (raster.effect.y != 0.0) color = rotate_hue(color, raster.effect.y);
+  if (raster.effect.z > 0.0) color = mix(color, colorize(color, raster.colorize.rgb), raster.effect.z);
+  return clamp(color, 0.0, 1.0);
+}
+
+float rounded_box_distance(vec2 point, vec2 half_size, float radius) {
+  vec2 edge = abs(point) - (half_size - vec2(radius));
+  return length(max(edge, vec2(0.0))) + min(max(edge.x, edge.y), 0.0) - radius;
+}
+
+vec4 unpack_pixel(uint value) {
+  return vec4(float(value & 255u), float((value >> 8u) & 255u),
+              float((value >> 16u) & 255u), float(value >> 24u)) / 255.0;
+}
+
+float unpack_alpha(ivec2 coordinate) {
+  ivec2 size = ivec2(raster.source_info.yz);
+  uint pixel = uint(coordinate.y * size.x + coordinate.x);
+  uint packed = source.pixels[uint(raster.source_info.x) + pixel / 4u];
+  return float((packed >> ((pixel & 3u) * 8u)) & 255u) / 255.0;
+}
+
+vec4 sample_pixel(vec2 coordinate) {
+  ivec2 size = ivec2(raster.source_info.yz);
+  vec2 position = clamp(coordinate * vec2(size) - vec2(0.5),
+                        vec2(0.0), vec2(size - 1));
+  ivec2 low = ivec2(floor(position));
+  ivec2 high = min(low + 1, size - 1);
+  vec2 fraction = fract(position);
+  if (raster.params.w > 0.5) {
+    float a = unpack_alpha(low);
+    float b = unpack_alpha(ivec2(high.x, low.y));
+    float c = unpack_alpha(ivec2(low.x, high.y));
+    float d = unpack_alpha(high);
+    float alpha = mix(mix(a, b, fraction.x), mix(c, d, fraction.x), fraction.y);
+    return vec4(1.0, 1.0, 1.0, alpha);
+  }
+  uint offset = uint(raster.source_info.x);
+  vec4 a = unpack_pixel(source.pixels[offset + uint(low.y * size.x + low.x)]);
+  vec4 b = unpack_pixel(source.pixels[offset + uint(low.y * size.x + high.x)]);
+  vec4 c = unpack_pixel(source.pixels[offset + uint(high.y * size.x + low.x)]);
+  vec4 d = unpack_pixel(source.pixels[offset + uint(high.y * size.x + high.x)]);
+  return mix(mix(a, b, fraction.x), mix(c, d, fraction.x), fraction.y);
+}
+
+vec2 mask_point(uint index) {
+  uint at = uint(raster.colorize.w) + index * 2u;
+  return vec2(uintBitsToFloat(source.pixels[at]), uintBitsToFloat(source.pixels[at + 1u])) * raster.bounds.zw;
+}
+
+// Signed distance to the mask polygon: the nearest edge, inside by the
+// non-zero winding number.
+float mask_distance(vec2 point) {
+  uint count = uint(raster.effect.w);
+  float nearest = 1e9;
+  int winding = 0;
+  vec2 a = mask_point(count - 1u);
+  for (uint index = 0u; index < count; ++index) {
+    vec2 b = mask_point(index);
+    vec2 edge = b - a;
+    vec2 offset = point - a;
+    float t = clamp(dot(offset, edge) / max(dot(edge, edge), 1e-12), 0.0, 1.0);
+    nearest = min(nearest, length(offset - edge * t));
+    float cross_z = edge.x * offset.y - edge.y * offset.x;
+    if (a.y <= point.y) {
+      if (b.y > point.y && cross_z > 0.0) winding += 1;
+    } else if (b.y <= point.y && cross_z < 0.0) {
+      winding -= 1;
+    }
+    a = b;
+  }
+  return winding != 0 ? -nearest : nearest;
+}
+
+void main() {
+  ivec2 local = ivec2(gl_GlobalInvocationID.xy);
+  ivec2 size = ivec2(ceil(raster.bounds.zw));
+  if (any(greaterThanEqual(local, size))) return;
+  ivec2 destination = ivec2(floor(raster.bounds.xy)) + local;
+  if (any(lessThan(destination, ivec2(0))) ||
+      any(greaterThanEqual(destination, imageSize(target_image)))) return;
+  vec2 point = vec2(local) + vec2(0.5);
+  vec2 half_size = raster.bounds.zw * 0.5;
+  float coverage = 1.0 - smoothstep(-0.5, 0.5,
+      rounded_box_distance(point - half_size, half_size, raster.params.x));
+  if (raster.effect.w >= 3.0) {
+    coverage *= 1.0 - smoothstep(-0.5, 0.5, mask_distance(point));
+    if (coverage <= 0.0) return;
+  }
+  if (raster.clip.z > 0.0 && raster.clip.w > 0.0) {
+    vec2 clip_point = vec2(destination) + vec2(0.5) - raster.clip.xy;
+    vec2 clip_half = raster.clip.zw * 0.5;
+    if (rounded_box_distance(clip_point - clip_half, clip_half, raster.params.y) > 0.0) return;
+  }
+  vec4 sampled = sample_pixel(point / raster.bounds.zw);
+  vec4 source_color;
+  if (raster.source_info.w > 0.5) {
+    sampled.rgb = apply_effects(sampled.rgb);
+    sampled *= raster.tint;
+    float alpha = sampled.a * coverage;
+    source_color = vec4(sampled.rgb * alpha, alpha);
+  } else {
+    source_color = sampled * (raster.params.z * coverage);
+  }
+  float alpha = source_color.a;
+  vec4 current = imageLoad(target_image, destination);
+  imageStore(target_image, destination, source_color + current * (1.0 - alpha));
+}
