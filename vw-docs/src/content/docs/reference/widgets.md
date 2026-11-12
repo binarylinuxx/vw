@@ -35,6 +35,16 @@ Every widget takes `place` and most take `input`:
 | `border_width`, `border_color` | an inside border |
 | `shader`, `shader_params`, `shader_data` | a [custom shader](/guides/shaders/) |
 
+A gradient runs from `color` to `color2`, left to right (`horizontal`) or top to bottom (`vertical`), clipped to the rounded corners:
+
+```cpp
+ui.rectangle({.width = 320, .height = 120, .radius = 24,
+              .color = vw::rgb(0xa7cbe7), .color2 = vw::rgb(0xdbddff),
+              .gradient = vw::Gradient::horizontal});
+```
+
+Two stops along an axis is what rectangles do; for angles, more stops or radial fills, draw with a [custom shader](/guides/shaders/) or a [canvas](#canvas).
+
 ## text
 
 | Prop | Meaning |

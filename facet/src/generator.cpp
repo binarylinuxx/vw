@@ -17,7 +17,7 @@ namespace {
 
 enum class Type {
   number, integer, size, boolean, string, strings, color, handler, input, padding,
-  anchor, layer, justify, align, weight, fit, text_align,
+  anchor, layer, justify, align, weight, fit, text_align, gradient,
 };
 
 struct Property {
@@ -54,7 +54,8 @@ const std::vector<Element>& elements() {
         {"namespace", "surface_namespace", string}, {"refresh", "refresh_interval", number}}, "", ""},
       {"vw.ui", "Rectangle", Kind::rectangle, "vw::RectangleProps",
        {{"width", "width", number}, {"height", "height", number}, {"radius", "radius", number},
-        {"color", "color", color}, {"bg", "color", color}, {"border_width", "border_width", number},
+        {"color", "color", color}, {"bg", "color", color}, {"color2", "color2", color},
+        {"gradient", "gradient", Type::gradient}, {"border_width", "border_width", number},
         {"border_color", "border_color", color}, {"input", "input", input}}, "", ""},
       {"vw.ui", "Text", Kind::text, "vw::TextProps",
        {{"text", "text", string}, {"font", "font", string}, {"size", "size", number},
@@ -126,6 +127,8 @@ const std::map<std::string, std::string>& choices(Type type) {
       {Type::fit, {{"stretch", "vw::ImageFit::stretch"}, {"contain", "vw::ImageFit::contain"},
                    {"cover", "vw::ImageFit::cover"}}},
       {Type::text_align, {{"start", "\"start\""}, {"center", "\"center\""}, {"end", "\"end\""}}},
+      {Type::gradient, {{"none", "vw::Gradient::none"}, {"horizontal", "vw::Gradient::horizontal"},
+                        {"vertical", "vw::Gradient::vertical"}}},
   };
   return table.at(type);
 }
