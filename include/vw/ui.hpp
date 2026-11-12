@@ -167,9 +167,11 @@ struct TextProps {
 };
 
 struct ImageProps {
-  // Either a file path or an icon name/serialized GIcon.
+  // A file path, an icon name/serialized GIcon, or pixels in memory (such as
+  // vw::capture_output) when both are empty.
   std::string path;
   std::string icon;
+  Bitmap bitmap;
   // Zero keeps the image's natural size or aspect ratio.
   float width = 0.0F;
   float height = 0.0F;
@@ -353,6 +355,10 @@ struct ToplevelProps {
   double refresh_interval = 1.0;
   std::string title = "vw";
   std::string app_id = "vw";
+  // Ask the compositor to draw the titlebar and borders (server) or leave
+  // them to the window (client); automatic takes the compositor's choice.
+  // vw::toplevel_server_decorated() says what it picked. Needs zwwm.
+  Decorations decorations = Decorations::automatic;
   // The window was closed. Without a handler the whole app exits.
   CloseHandler on_close;
 };

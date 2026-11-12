@@ -287,26 +287,28 @@ Widget Ui::text(const TextProps& props) {
 }
 
 Widget Ui::image(const ImageProps& props) {
-  if (props.path.empty() && props.icon.empty())
-    throw std::invalid_argument("image requires path or icon");
+  if (props.path.empty() && props.icon.empty() && props.bitmap.empty())
+    throw std::invalid_argument("image requires path, icon or bitmap");
+  if (!props.mask.empty() && (props.mask.size() < 6 || props.mask.size() % 2 != 0))
+    throw std::invalid_argument("image mask needs at least three x, y points");
   Rectangle style = base_style(props.place, true);
   style.radius = props.radius;
   style.color = clamped(props.tint);
   style.raster_visible = style.visible;
-  const auto source = props.path.empty()
-      ? resolve_icon(props.icon, static_cast<int>(std::max({48.0F, props.width, props.height})))
-      : std::filesystem::path(props.path);
-  if (source.empty()) throw std::runtime_error("icon was not found: " + props.icon);
   const std::size_t begin = scene_.rectangles.size();
-  const auto [width, height] =
-      add_image(scene_, source, props.width, props.height, style, props.fit);
-  scene_.rasters.back().effect = props.effect;
-  if (!props.mask.empty()) {
-    if (props.mask.size() < 6 || props.mask.size() % 2 != 0)
-      throw std::invalid_argument("image mask needs at least three x, y points");
-    scene_.rasters.back().mask = props.mask;
+  std::pair<float, float> size;
+  if (props.path.empty() && props.icon.empty()) {
+    size = add_image(scene_, props.bitmap, props.width, props.height, style, props.fit);
+  } else {
+    const auto source = props.path.empty()
+        ? resolve_icon(props.icon, static_cast<int>(std::max({48.0F, props.width, props.height})))
+        : std::filesystem::path(props.path);
+    if (source.empty()) throw std::runtime_error("icon was not found: " + props.icon);
+    size = add_image(scene_, source, props.width, props.height, style, props.fit);
   }
-  return push(begin, width, height, style, props.input);
+  scene_.rasters.back().effect = props.effect;
+  scene_.rasters.back().mask = props.mask;
+  return push(begin, size.first, size.second, style, props.input);
 }
 
 Widget Ui::canvas(const CanvasProps& props) {
@@ -826,6 +828,7 @@ void Ui::toplevel(const ToplevelProps& props) {
   scene_.toplevel_height = size.height;
   scene_.title = props.title;
   scene_.app_id = props.app_id;
+  scene_.decorations = props.decorations;
   scene_.on_closed = props.on_close;
 }
 

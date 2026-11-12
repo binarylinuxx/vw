@@ -124,6 +124,16 @@ struct Rectangle {
 // a scene full of cached text and images costs no pixel copies.
 using Pixels = std::shared_ptr<const std::vector<std::uint32_t>>;
 
+// Image pixels held in memory, such as a screen capture: width * height
+// values, row by row, each RGBA with red in the low byte.
+struct Bitmap {
+  std::uint32_t width = 0;
+  std::uint32_t height = 0;
+  Pixels rgba;
+
+  bool empty() const { return width == 0 || height == 0 || !rgba; }
+};
+
 // Per-pixel colour work on an image, applied in the raster shader in this
 // order: saturation, hue, colorize, then the multiplying tint.
 struct ImageEffect {
@@ -252,6 +262,9 @@ struct ScrollArea {
   bool enabled = true;
 };
 
+// Who draws a toplevel's titlebar and borders.
+enum class Decorations { automatic, client, server };
+
 struct Scene {
   std::vector<Rectangle> rectangles;
   std::vector<Raster> rasters;
@@ -281,6 +294,7 @@ struct Scene {
   std::string app_id = "vw";
   std::uint32_t toplevel_width = 0;
   std::uint32_t toplevel_height = 0;
+  Decorations decorations = Decorations::automatic;
   double refresh_interval = 1.0;
   bool session_lock = false;
   bool lock_surface = false;

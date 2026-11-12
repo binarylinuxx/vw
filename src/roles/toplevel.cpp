@@ -4,6 +4,7 @@
 #include "vw/host.hpp"
 
 #include <xdg-shell-zwayland-client.h>
+#include <zwwm-decoration-manager-v1-zwayland-client.h>
 #include <wayland-zwayland-client.h>
 #include <zwayland/client/core.hpp>
 
@@ -21,9 +22,12 @@ class ToplevelRole final : public Role {
   using Role::Role;
 
   void global(std::uint32_t name, std::string_view interface, std::uint32_t version) override {
-    if (interface != generated::xdg_wm_base_interface.name) return;
-    wm_name_ = name;
-    wm_version_ = version;
+    if (interface == generated::xdg_wm_base_interface.name) {
+      wm_name_ = name;
+      wm_version_ = version;
+    } else if (interface == generated::zwwm_decoration_manager_v1_interface.name) {
+      decoration_name_ = name;
+    }
   }
 
   void bind() override {
@@ -40,6 +44,15 @@ class ToplevelRole final : public Role {
       }
     };
     wm_base_->set_observer(generated::xdg_wm_base_observer(WmEvents{&display()}));
+    if (decoration_name_ != 0) {
+      decoration_manager_ = client::core::bind(display(), registry(), decoration_name_,
+          generated::zwwm_decoration_manager_v1_interface, 1);
+      struct ManagerEvents {
+        void default_mode(client::Proxy&, std::uint32_t) {}
+      };
+      if (decoration_manager_ != nullptr)
+        decoration_manager_->set_observer(generated::zwwm_decoration_manager_v1_observer(ManagerEvents{}));
+    }
   }
 
   void create() override {
@@ -69,11 +82,13 @@ class ToplevelRole final : public Role {
     toplevel_->set_observer(generated::xdg_toplevel_observer(ToplevelEvents{this}));
     generated::xdg_toplevel_set_title(display(), toplevel_->id, scene().title);
     generated::xdg_toplevel_set_app_id(display(), toplevel_->id, scene().app_id);
+    create_decoration();
     generated::wl_surface_commit(display(), surface()->id);
     flush("could not flush initial xdg surface state");
   }
 
   void present(bool) override {
+    request_decorations();
     set_input_region();
     generated::xdg_toplevel_set_title(display(), toplevel_->id, scene().title);
     generated::xdg_toplevel_set_app_id(display(), toplevel_->id, scene().app_id);
@@ -85,6 +100,9 @@ class ToplevelRole final : public Role {
   void destroy() noexcept override {
     if (toplevel_ == nullptr) return;
     try {
+      if (decoration_ != nullptr) generated::zwwm_surface_decoration_v1_destroy(display(), decoration_->id);
+      if (decoration_manager_ != nullptr)
+        generated::zwwm_decoration_manager_v1_destroy(display(), decoration_manager_->id);
       generated::xdg_toplevel_destroy(display(), toplevel_->id);
       generated::xdg_surface_destroy(display(), xdg_surface_->id);
       generated::xdg_wm_base_destroy(display(), wm_base_->id);
@@ -93,6 +111,37 @@ class ToplevelRole final : public Role {
   }
 
  private:
+  // The compositor answers every request with the mode it chose, and may
+  // change it later; the window rebuilds to add or drop its own titlebar.
+  void create_decoration() {
+    if (decoration_manager_ == nullptr) return;
+    const auto id = generated::zwwm_decoration_manager_v1_get_decoration(
+        display(), decoration_manager_->id, surface());
+    decoration_ = display().find_proxy(id);
+    if (decoration_ == nullptr) throw std::runtime_error("could not create zwwm decoration");
+    struct DecorationEvents {
+      ToplevelRole* role;
+      void configure(client::Proxy&, std::uint32_t mode) {
+        const bool server = mode == generated::ZWWM_DECORATION_MANAGER_V1_MODE_SERVER_SIDE;
+        const bool changed = server != toplevel_server_decorated();
+        set_toplevel_server_decorated(server);
+        if (changed && role->configured() && role->can_render()) role->rebuild();
+      }
+    };
+    decoration_->set_observer(generated::zwwm_surface_decoration_v1_observer(DecorationEvents{this}));
+    request_decorations();
+  }
+
+  void request_decorations() {
+    const Decorations wanted = scene().decorations;
+    if (decoration_ == nullptr || wanted == requested_) return;
+    requested_ = wanted;
+    if (wanted == Decorations::automatic) return;
+    generated::zwwm_surface_decoration_v1_set_mode(display(), decoration_->id,
+        wanted == Decorations::server ? generated::ZWWM_DECORATION_MANAGER_V1_MODE_SERVER_SIDE
+                                      : generated::ZWWM_DECORATION_MANAGER_V1_MODE_CLIENT_SIDE);
+  }
+
   void on_configure(std::uint32_t serial) {
     generated::xdg_surface_ack_configure(display(), xdg_surface_->id, serial);
     const std::uint32_t target_width = pending_width_ == 0 ? width() : pending_width_;
@@ -122,6 +171,10 @@ class ToplevelRole final : public Role {
   client::Proxy* toplevel_ = nullptr;
   std::uint32_t pending_width_ = 0;
   std::uint32_t pending_height_ = 0;
+  std::uint32_t decoration_name_ = 0;
+  client::Proxy* decoration_manager_ = nullptr;
+  client::Proxy* decoration_ = nullptr;
+  Decorations requested_ = Decorations::automatic;
 };
 
 }  // namespace

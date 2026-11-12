@@ -35,6 +35,7 @@ LockState& lock() {
 }
 
 std::atomic_bool close_requested = false;
+std::atomic_bool server_decorated = false;
 std::atomic_bool locked = false;
 std::atomic_bool authenticated = false;
 std::atomic_bool authentication_failed = false;
@@ -70,6 +71,8 @@ Size current_surface_size;
 Size surface_size() { return current_surface_size; }
 void set_surface_size(Size size) { current_surface_size = size; }
 bool toplevel_close_requested() { return close_requested.load(); }
+bool toplevel_server_decorated() { return server_decorated.load(); }
+void set_toplevel_server_decorated(bool server) { server_decorated.store(server); }
 
 LockSurfaceContext lock_surface_context() {
   std::lock_guard guard(host_mutex());

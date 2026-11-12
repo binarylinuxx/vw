@@ -207,33 +207,12 @@ std::vector<std::pair<std::string, Fitted>>& fitted_cache() {
   return cache;
 }
 
-}  // namespace
 
-std::pair<float, float> add_image(Scene& scene, const std::filesystem::path& path,
-                                  float width, float height, const Rectangle& style,
-                                  ImageFit fit) {
-  const auto push = [&](const Fitted& fitted) {
-    Rectangle carrier = style;
-    carrier.width = fitted.width;
-    carrier.height = fitted.height;
-    carrier.visible = false;
-    const std::size_t carrier_index = scene.rectangles.size();
-    scene.add(carrier);
-    scene.rasters.push_back(Raster{carrier_index, fitted.pixel_width, fitted.pixel_height, fitted.pixels});
-    return std::pair{fitted.width, fitted.height};
-  };
+// Crops and downscales `source` to width x height (either 0 keeps the
+// natural size) the way `fit` asks.
+Fitted fit_image(const DecodedImage& source_image, float width, float height, ImageFit fit) {
+  const DecodedImage* source = &source_image;
   const bool sized = width > 0 && height > 0;
-  std::string key;
-  if (sized) {
-    key = path.string() + '\x1f' + std::to_string(static_cast<int>(fit)) + '\x1f' +
-          std::to_string(width) + 'x' + std::to_string(height) + '\x1f' +
-          std::to_string(std::filesystem::last_write_time(path).time_since_epoch().count());
-    std::lock_guard lock(fitted_mutex);
-    for (const auto& [entry_key, fitted] : fitted_cache())
-      if (entry_key == key) return push(fitted);
-  }
-
-  const auto source = decode_image(path, width, height);
   std::uint32_t source_width = static_cast<std::uint32_t>(source->width);
   std::uint32_t source_height = static_cast<std::uint32_t>(source->height);
   Pixels pixels = source->rgba;
@@ -278,6 +257,80 @@ std::pair<float, float> add_image(Scene& scene, const std::filesystem::path& pat
   }
   const Fitted fitted{std::move(pixels), source_width, source_height,
                       static_cast<float>(output_width), static_cast<float>(output_height)};
+  return fitted;
+}
+}  // namespace
+
+namespace {
+
+void push_fitted(Scene& scene, const Fitted& fitted, const Rectangle& style) {
+  Rectangle carrier = style;
+  carrier.width = fitted.width;
+  carrier.height = fitted.height;
+  carrier.visible = false;
+  const std::size_t carrier_index = scene.rectangles.size();
+  scene.add(carrier);
+  scene.rasters.push_back(Raster{carrier_index, fitted.pixel_width, fitted.pixel_height, fitted.pixels});
+}
+
+// Fitted bitmaps by their pixels, fit and size: a capture redrawn on every
+// build is downscaled once. Holding the pixels keeps the key unambiguous.
+struct FittedBitmap {
+  Pixels source;
+  float width = 0;
+  float height = 0;
+  ImageFit fit = ImageFit::stretch;
+  Fitted fitted;
+};
+
+std::vector<FittedBitmap>& fitted_bitmaps() {
+  static std::vector<FittedBitmap> cache;
+  return cache;
+}
+
+}  // namespace
+
+std::pair<float, float> add_image(Scene& scene, const Bitmap& bitmap,
+                                  float width, float height, const Rectangle& style,
+                                  ImageFit fit) {
+  if (bitmap.empty() || bitmap.rgba->size() != static_cast<std::size_t>(bitmap.width) * bitmap.height)
+    throw std::invalid_argument("bitmap pixels do not match its size");
+  std::lock_guard lock(fitted_mutex);
+  auto& cache = fitted_bitmaps();
+  const auto found = std::ranges::find_if(cache, [&](const FittedBitmap& entry) {
+    return entry.source == bitmap.rgba && entry.width == width && entry.height == height &&
+           entry.fit == fit;
+  });
+  if (found == cache.end()) {
+    const DecodedImage source{static_cast<int>(bitmap.width), static_cast<int>(bitmap.height), {},
+                              bitmap.rgba};
+    if (cache.size() >= 16) cache.erase(cache.begin());
+    cache.push_back({bitmap.rgba, width, height, fit, fit_image(source, width, height, fit)});
+  }
+  const Fitted& fitted = found == cache.end() ? cache.back().fitted : found->fitted;
+  push_fitted(scene, fitted, style);
+  return {fitted.width, fitted.height};
+}
+
+std::pair<float, float> add_image(Scene& scene, const std::filesystem::path& path,
+                                  float width, float height, const Rectangle& style,
+                                  ImageFit fit) {
+  const auto push = [&](const Fitted& fitted) {
+    push_fitted(scene, fitted, style);
+    return std::pair{fitted.width, fitted.height};
+  };
+  const bool sized = width > 0 && height > 0;
+  std::string key;
+  if (sized) {
+    key = path.string() + '\x1f' + std::to_string(static_cast<int>(fit)) + '\x1f' +
+          std::to_string(width) + 'x' + std::to_string(height) + '\x1f' +
+          std::to_string(std::filesystem::last_write_time(path).time_since_epoch().count());
+    std::lock_guard lock(fitted_mutex);
+    for (const auto& [entry_key, fitted] : fitted_cache())
+      if (entry_key == key) return push(fitted);
+  }
+
+  const Fitted fitted = fit_image(*decode_image(path, width, height), width, height, fit);
   if (sized) {
     std::lock_guard lock(fitted_mutex);
     auto& cache = fitted_cache();

@@ -20,6 +20,10 @@ Size toplevel_size();
 void request_toplevel_size(std::uint32_t width, std::uint32_t height);
 void set_toplevel_size(std::uint32_t width, std::uint32_t height);
 void request_toplevel_close();
+// Whether the compositor draws this window's titlebar and borders, so the
+// window should not draw its own (see ToplevelProps::decorations).
+bool toplevel_server_decorated();
+void set_toplevel_server_decorated(bool server);
 
 // Size the compositor configured for the surface currently being built;
 // {0, 0} until its first configure. Fill-size surfaces (SurfaceProps width or

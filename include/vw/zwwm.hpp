@@ -39,6 +39,33 @@ Result reload();
 Result rebuild_switch_shaders();
 Result set_cursor(std::string_view theme, std::uint32_t size);
 
+// Touch swipes that start at an output edge. The compositor recognises them
+// and keeps the touch away from other clients; the shell decides what a
+// swipe does, e.g. drags a sidebar open with `distance`.
+enum Edge : std::uint32_t { top = 1, bottom = 2, left = 4, right = 8 };
+
+struct EdgeSwipe {
+  enum class Phase { began, progress, ended };
+  Phase phase = Phase::began;
+  Edge edge = top;
+  // Where the touch went down, output-local; set on began.
+  float x = 0;
+  float y = 0;
+  // Logical pixels from the touch-down point: along the swipe (positive
+  // towards the inside of the output) and across it.
+  float distance = 0;
+  float lateral = 0;
+  // Along the swipe, in logical pixels per second; set on ended.
+  float velocity = 0;
+  bool cancelled = false;
+};
+
+// Follows swipes from `edges` (Edge bits ORed together); 0 stops. Swipes are
+// delivered through event_fd()/drain_events() and collected with
+// take_edge_swipes(), oldest first. Throws without the protocol.
+void watch_edge_swipes(std::uint32_t edges);
+std::vector<EdgeSwipe> take_edge_swipes();
+
 // Readable when compositor state changes, or -1 without zwwm; see
 // vw::App::on_event.
 int event_fd();

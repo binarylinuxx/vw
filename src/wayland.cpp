@@ -143,7 +143,8 @@ bool same_presentation(const Scene& a, const Scene& b) {
          a.exclusive_zone == b.exclusive_zone && a.accepts_input == b.accepts_input &&
          a.selective_input == b.selective_input && a.focus_grab == b.focus_grab &&
          a.input_regions == b.input_regions && a.surface_namespace == b.surface_namespace &&
-         a.title == b.title && a.app_id == b.app_id && a.rectangles == b.rectangles &&
+         a.title == b.title && a.app_id == b.app_id && a.decorations == b.decorations &&
+         a.rectangles == b.rectangles &&
          a.rasters == b.rasters;
 }
 

@@ -57,7 +57,6 @@ ctx.globalCompositeOperation = 'source-over';
 })();
 )JS";
 
-struct Bitmap { std::uint32_t width, height; Pixels pixels; };
 
 class Canvas {
  public:
@@ -411,7 +410,7 @@ std::pair<float, float> add_canvas(Scene& scene, std::string_view id,
   carrier.height = static_cast<float>(height);
   const auto index = scene.rectangles.size();
   scene.add(carrier);
-  scene.rasters.push_back(Raster{index, width, height, bitmap.pixels, false, false, true});
+  scene.rasters.push_back(Raster{index, width, height, bitmap.rgba, false, false, true});
   if (animated) request_animation_continuation();
   return {static_cast<float>(width), static_cast<float>(height)};
 }

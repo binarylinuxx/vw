@@ -33,6 +33,7 @@ A build that draws nothing leaves the surface unmapped.
 | `width`, `height` | content size | initial size |
 | `refresh_interval` | 1 s | periodic rebuilds |
 | `title`, `app_id` | `"vw"` | window metadata |
+| `decorations` | `automatic` | `server` asks zwwm to draw the titlebar and borders, `client` leaves them to you; `vw::toplevel_server_decorated()` says what it chose |
 | `on_close` | exit | the window was closed |
 
 ## SessionLockProps and LockSurfaceProps

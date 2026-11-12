@@ -13,6 +13,29 @@ description: Typed state from zwwm's protocols, and Hyprland's IPC — each with
 | `snapshot(type)` | JSON for `status`, `outputs`, `toplevels`, `output_tags`, `layers`, `cameras`, `keyboard`, `live` |
 | `dispatch(action, argument)` | runs a compositor action; returns `{success, message}` |
 | `reload()`, `set_cursor(theme, size)`, `rebuild_switch_shaders()` | compositor control |
+| `watch_edge_swipes(edges)` | follow touch swipes from `Edge::top`, `bottom`, `left`, `right` (ORed); `0` stops |
+| `take_edge_swipes()` | swipes since the last call: `phase` (`began`, `progress`, `ended`), `edge`, `distance`, `lateral`, `velocity`, `cancelled` |
+
+Edge swipes arrive through `event_fd()` like every other zwwm event. The compositor keeps the touch away from other clients; drag a panel with `distance` while the swipe is in progress and decide on `ended` from `distance` and `velocity`:
+
+```cpp
+vw::zwwm::watch_edge_swipes(vw::zwwm::left);
+app.on_event(vw::zwwm::event_fd(), [] {
+  const bool changed = vw::zwwm::drain_events();
+  for (const auto& swipe : vw::zwwm::take_edge_swipes()) {
+    sidebar_offset = swipe.phase == vw::zwwm::EdgeSwipe::Phase::ended ? 0 : swipe.distance;
+    if (swipe.phase == vw::zwwm::EdgeSwipe::Phase::ended && !swipe.cancelled)
+      sidebar_open = swipe.distance > 120 || swipe.velocity > 600;
+  }
+  return changed;
+});
+```
+
+## Screen capture — `vw/capture.hpp`
+
+`vw::capture_output({.output, .region, .cursor})` returns a `vw::Bitmap` of what an output shows, through wlr-screencopy (zwwm and other wlroots-style compositors). Draw it with `ui.image({.bitmap = shot, .width = 320, .height = 180, .fit = vw::ImageFit::cover})`; vw downscales a bitmap once and reuses it while the pixels stay the same.
+
+A full 1080p capture takes about one frame, so take one on a refresh interval or when an event says the screen changed, not in every build. zwwm keeps its per-window capture (`zwwm_screencopy_view`) for its own portal, so window thumbnails come from cropping an output capture to a window's geometry from `snapshot(Snapshot::toplevels)`.
 
 zwwm streams events many times a second; compare what you draw (tags, the focused window) before deciding to rebuild. A snapshot is a round trip to the compositor — take one per change, not one per frame.
 

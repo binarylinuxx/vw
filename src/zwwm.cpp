@@ -2,6 +2,7 @@
 
 #include <ext-zwwm-manager-v1-zwayland-client.h>
 #include <zwwm-tags-unstable-v1-zwayland-client.h>
+#include <zwwm-edge-swipe-v1-zwayland-client.h>
 #include <wayland-zwayland-client.h>
 #include <zwayland/client/core.hpp>
 #include <zwayland/client/display.hpp>
@@ -126,6 +127,7 @@ class Service {
     if (registry == nullptr) throw std::runtime_error("could not create zwwm registry");
     registry->set_observer(generated::wl_registry_observer(Registry{this}));
     check(display_->roundtrip());
+    registry_ = registry;
     if (manager_name_ != 0) {
       manager_ = zwayland::client::core::bind(*display_, *registry, manager_name_,
           generated::ext_zwwm_manager_v1_interface,
@@ -154,7 +156,9 @@ class Service {
     dirty_ = false;
   }
 
-  bool available() const { return manager_ != nullptr || tags_ != nullptr; }
+  bool available() const {
+    return manager_ != nullptr || tags_ != nullptr || edge_swipe_name_ != 0;
+  }
   bool has_manager() const { return manager_ != nullptr; }
   bool has_tags() const { return tags_ != nullptr; }
   int fd() const { return available() ? display_->fd() : -1; }
@@ -221,6 +225,29 @@ class Service {
     return result(generated::ext_zwwm_manager_v1_set_cursor(
         *display_, manager_->id, theme, size));
   }
+  void watch_edge_swipes(std::uint32_t edges) {
+    if (edge_swipe_name_ == 0) throw std::runtime_error("zwwm edge swipe protocol is unavailable");
+    if (edge_manager_ == nullptr) {
+      edge_manager_ = zwayland::client::core::bind(*display_, *registry_, edge_swipe_name_,
+          generated::zwwm_edge_swipe_manager_v1_interface, 1);
+      if (edge_manager_ == nullptr) throw std::runtime_error("could not bind zwwm edge swipes");
+    }
+    if (edges == 0) {
+      if (edge_swipe_ != nullptr) generated::zwwm_edge_swipe_v1_destroy(*display_, edge_swipe_->id);
+      edge_swipe_ = nullptr;
+    } else if (edge_swipe_ != nullptr) {
+      generated::zwwm_edge_swipe_v1_set_edges(*display_, edge_swipe_->id, edges);
+    } else {
+      const auto id = generated::zwwm_edge_swipe_manager_v1_get_edge_swipe(
+          *display_, edge_manager_->id, edges);
+      edge_swipe_ = display_->find_proxy(id);
+      if (edge_swipe_ == nullptr) throw std::runtime_error("could not create zwwm edge swipe");
+      edge_swipe_->set_observer(generated::zwwm_edge_swipe_v1_observer(SwipeEvents{this}));
+    }
+    check(display_->flush());
+  }
+  std::vector<EdgeSwipe> take_edge_swipes() { return std::exchange(swipes_, {}); }
+
   void set_active_tags(const std::vector<std::uint32_t>& ids) {
     if (tags_ == nullptr) throw std::runtime_error("zwwm tags protocol is unavailable");
     const auto* bytes = reinterpret_cast<const std::byte*>(ids.data());
@@ -239,6 +266,8 @@ class Service {
         self->manager_version_ = version;
       } else if (interface == generated::zwwm_tags_v1_interface.name) {
         self->tags_name_ = name;
+      } else if (interface == generated::zwwm_edge_swipe_manager_v1_interface.name) {
+        self->edge_swipe_name_ = name;
       }
     }
     void global_remove(Proxy&, std::uint32_t name) {
@@ -265,6 +294,32 @@ class Service {
     }
     void toplevel_tags(Proxy&, Proxy*, std::span<const std::byte>) { self->dirty_ = true; }
     void toplevel_closed(Proxy&, Proxy*) { self->dirty_ = true; }
+  };
+  struct SwipeEvents {
+    Service* self;
+    std::uint32_t edge = 0;
+    void began(Proxy&, std::uint32_t, Proxy*, std::uint32_t edge_bit, double x, double y) {
+      edge = edge_bit;
+      push({EdgeSwipe::Phase::began, static_cast<Edge>(edge), static_cast<float>(x),
+            static_cast<float>(y)});
+    }
+    void progress(Proxy&, std::uint32_t, double distance, double lateral) {
+      push({EdgeSwipe::Phase::progress, static_cast<Edge>(edge), 0, 0,
+            static_cast<float>(distance), static_cast<float>(lateral)});
+    }
+    void ended(Proxy&, std::uint32_t, double distance, double lateral, double velocity,
+               std::uint32_t cancelled) {
+      push({EdgeSwipe::Phase::ended, static_cast<Edge>(edge), 0, 0, static_cast<float>(distance),
+            static_cast<float>(lateral), static_cast<float>(velocity), cancelled != 0});
+    }
+    void push(EdgeSwipe swipe) {
+      // Progress arrives at touch rate; a slow consumer only needs the latest.
+      if (swipe.phase == EdgeSwipe::Phase::progress && !self->swipes_.empty() &&
+          self->swipes_.back().phase == EdgeSwipe::Phase::progress)
+        self->swipes_.back() = swipe;
+      else self->swipes_.push_back(swipe);
+      self->dirty_ = true;
+    }
   };
   struct ResultEvents {
     Result* result;
@@ -295,6 +350,11 @@ class Service {
   Proxy* manager_ = nullptr;
   Proxy* tags_ = nullptr;
   Proxy* subscription_ = nullptr;
+  Proxy* registry_ = nullptr;
+  std::uint32_t edge_swipe_name_ = 0;
+  Proxy* edge_manager_ = nullptr;
+  Proxy* edge_swipe_ = nullptr;
+  std::vector<EdgeSwipe> swipes_;
   std::map<std::uint32_t, std::string> tag_names_;
   std::map<std::uint32_t, std::string> pending_tags_;
   std::vector<std::uint32_t> active_tags_;
@@ -345,6 +405,9 @@ Result dispatch(std::string_view action, std::string_view argument) {
 Result reload() { return service().reload(); }
 Result rebuild_switch_shaders() { return service().rebuild_switch_shaders(); }
 Result set_cursor(std::string_view theme, std::uint32_t size) { return service().set_cursor(theme, size); }
+
+void watch_edge_swipes(std::uint32_t edges) { service().watch_edge_swipes(edges); }
+std::vector<EdgeSwipe> take_edge_swipes() { return service().take_edge_swipes(); }
 
 int event_fd() {
   try {

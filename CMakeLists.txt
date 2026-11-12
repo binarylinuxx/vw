@@ -102,6 +102,7 @@ add_library(vw_core SHARED
   src/bluetooth.cpp
   src/brightness.cpp
   src/canvas.cpp
+  src/capture.cpp
   src/dbus.cpp
   src/host.cpp
   src/hyprland.cpp
@@ -167,7 +168,7 @@ install(TARGETS vw_core vw-shaderc EXPORT vwTargets
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
   RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 install(FILES
-  include/vw/animation.hpp include/vw/app.hpp include/vw/applications.hpp include/vw/host.hpp
+  include/vw/animation.hpp include/vw/app.hpp include/vw/applications.hpp include/vw/capture.hpp include/vw/host.hpp
   include/vw/bluetooth.hpp include/vw/brightness.hpp include/vw/network.hpp
   include/vw/tray.hpp include/vw/upower.hpp
   include/vw/hyprland.hpp include/vw/ipc.hpp include/vw/mpris.hpp include/vw/notifications.hpp
