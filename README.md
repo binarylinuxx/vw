@@ -41,8 +41,9 @@ Start a project with `vw --init my-widget` (CMake) or `vw --init-nix my-widget` 
 nix flake init -t github:binarylinuxx/vw   # a new CMake project using vw
 ```
 
-In an existing flake, add the input `vw.url = "github:binarylinuxx/vw"` and the
-overlay `vw.overlays.default`, then put `pkgs.vw` in `buildInputs`. See
+To package a shell, pass its source to `vw.lib.mkShell { inherit system; pname; src = ./.; }`:
+cmake, clang and glslc come with it, vw links into the binary, and `shellDeps` adds
+your own libraries. See
 [Install and build](https://vw.zapzig.org/start/installation/#in-a-nix-flake-project).
 
 ## License

@@ -39,37 +39,45 @@ nix run                         # builds and starts it
 nix develop                     # or work on it with cmake by hand
 ```
 
-To add vw to a flake you already have, take its overlay, which puts `pkgs.vw` next to the rest of nixpkgs:
+To package a shell from a flake you already have, hand it to `vw.lib.mkShell`. It builds your `CMakeLists.txt` with clang, Ninja and glslc, links vw in statically so the package is your shell alone, and drops a local `build/` from the source:
 
 ```nix
 {
-  inputs = {
-    vw.url = "github:binarylinuxx/vw";
-    nixpkgs.follows = "vw/nixpkgs";
-  };
+  inputs.vw.url = "github:binarylinuxx/vw";
 
-  outputs = { self, nixpkgs, vw }:
-    let pkgs = import nixpkgs { system = "x86_64-linux"; overlays = [ vw.overlays.default ]; };
+  outputs = { self, vw }:
+    let
+      system = "x86_64-linux";
+      pkgs = vw.inputs.nixpkgs.legacyPackages.${system};
     in {
-      packages.x86_64-linux.default = pkgs.clangStdenv.mkDerivation {
-        pname = "my-widget";
-        version = "0.1.0";
+      packages.${system}.default = vw.lib.mkShell {
+        inherit system;
+        pname = "my-shell";
         src = ./.;
-        nativeBuildInputs = [ pkgs.cmake pkgs.ninja ];
-        buildInputs = [ pkgs.vw ];
+        shellDeps = [ pkgs.libnotify ];        # libraries, on top of vw's
+        nativeShellDeps = [ pkgs.python3 ];    # build tools, on top of cmake, ninja, glslc
       };
+      devShells.${system}.default = self.packages.${system}.default.devShell;
     };
 }
 ```
 
-`find_package(vw)` then works as below. For a shell, use `pkgs.vw-static` instead: vw links into your binary, so the package is the shell alone. Add `pkgs.shaderc` to `nativeBuildInputs` if you compile shaders with `vw_compile_shader()`. `vw.packages.<system>.default` is the same package without the overlay.
+Every other attribute (`version`, `cmakeFlags`, `postInstall`, `meta`, …) goes straight to `mkDerivation`. `.devShell` is a clang shell with everything the package builds with, for `cmake` by hand.
+
+For full control, take the overlay instead: it adds `pkgs.vw` and `pkgs.vw-static` next to the rest of nixpkgs, and `find_package(vw)` works as below.
+
+```nix
+pkgs = import nixpkgs { inherit system; overlays = [ vw.overlays.default ]; };
+# then: buildInputs = [ pkgs.vw-static ]; nativeBuildInputs = [ pkgs.cmake pkgs.ninja ];
+```
 
 | Flake output | What it is |
 | --- | --- |
-| `overlays.default` | adds `pkgs.vw` |
+| `overlays.default` | adds `pkgs.vw` and `pkgs.vw-static` |
 | `packages.<system>.default`, `.vw` | the library, headers, CMake package, `vw-shaderc`, examples |
 | `packages.<system>.vw-static` | the same with `libvw.a`; overlay name `pkgs.vw-static` |
 | `devShells.<system>.default` | everything needed to work on vw itself |
+| `lib.mkShell` | a CMake shell as a package, vw linked in; `.devShell` to work on it |
 | `templates.default` | a CMake project using vw |
 
 ## Without Nix
