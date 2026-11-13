@@ -6,7 +6,10 @@
 #include <string>
 #include <vector>
 
-// PipeWire audio devices and streams. The connection starts on first use.
+// PipeWire audio devices and streams. The connection starts on first use and
+// is driven entirely by PipeWire's events: reads return the latest snapshot
+// without blocking, and if PipeWire restarts the service reconnects when its
+// socket appears again.
 namespace vw::pipewire {
 
 struct Node {
@@ -56,7 +59,9 @@ Result toggle_mute(std::uint32_t id);
 Result set_default_sink(std::uint32_t id);
 Result set_default_source(std::uint32_t id);
 
-// Readable when devices or volumes change; see vw::App::on_event.
+// Readable when devices, volumes or defaults change, or PipeWire comes and
+// goes; see vw::App::on_event. Register it: reconnecting happens in
+// drain_events().
 int event_fd();
 bool drain_events();
 

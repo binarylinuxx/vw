@@ -13,7 +13,9 @@
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -23,7 +25,9 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <sys/epoll.h>
 #include <sys/eventfd.h>
+#include <sys/inotify.h>
 #include <unistd.h>
 
 namespace vw::pipewire {
@@ -34,6 +38,11 @@ bool sink(const AudioNode& node) { return node.media_class == "Audio/Sink"; }
 bool source(const AudioNode& node) { return node.media_class.starts_with("Audio/Source"); }
 double linear_volume(const AudioNode& node) { return node.linear_volume(); }
 
+// Everything is driven by events: PipeWire's own thread delivers registry,
+// node and metadata events and publishes a snapshot when something changed;
+// the eventfd wakes vw's loop. Nothing polls. If PipeWire is not running, or
+// goes away, an inotify watch on its socket brings the connection back when
+// the socket appears.
 class Pipewire {
   struct Bound {
     Pipewire* self;
@@ -48,119 +57,95 @@ class Pipewire {
     explicit LoopLock(pw_thread_loop* loop) : loop(loop) { pw_thread_loop_lock(loop); }
     ~LoopLock() { pw_thread_loop_unlock(loop); }
   };
+  // What readers see: copied out of the live state after each change, so
+  // reads never take PipeWire's loop lock.
+  struct Snapshot {
+    std::vector<AudioNode> nodes;  // by id
+    std::string default_sink, default_source;
+  };
 
  public:
-  Pipewire() : event_(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK)) {
-    if (event_ < 0) throw std::runtime_error("could not create PipeWire event fd");
+  Pipewire() : event_(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK)), epoll_(epoll_create1(EPOLL_CLOEXEC)) {
+    if (event_ < 0 || epoll_ < 0) throw std::runtime_error("could not create PipeWire event fd");
+    watch(event_);
+    watch_socket();
   }
-  ~Pipewire() { cleanup(); close(event_); }
-  int fd() const { return event_; }
+  ~Pipewire() {
+    cleanup();
+    for (const int fd : {event_, epoll_, inotify_})
+      if (fd >= 0) close(fd);
+  }
+
+  int fd() {
+    (void)start();
+    return epoll_;
+  }
+
+  // Wakeups from PipeWire's thread, and the socket appearing or going.
   bool drain() {
-    std::uint64_t count = 0;
     bool changed = false;
+    std::uint64_t count = 0;
     while (read(event_, &count, sizeof(count)) > 0) changed = true;
+    bool socket_appeared = false;
+    alignas(inotify_event) std::array<char, 4096> buffer{};
+    for (ssize_t length = 0; inotify_ >= 0 && (length = read(inotify_, buffer.data(), buffer.size())) > 0;) {
+      for (ssize_t offset = 0; offset < length;) {
+        const auto* event = reinterpret_cast<const inotify_event*>(buffer.data() + offset);
+        if (event->len > 0 && socket_name_ == event->name) socket_appeared = true;
+        offset += static_cast<ssize_t>(sizeof(inotify_event) + event->len);
+      }
+    }
+    std::lock_guard guard(initialization_);
+    if (loop_ != nullptr && !connected_.load()) {
+      // PipeWire went away: drop the dead connection, show no devices, and
+      // reconnect now if its socket is already back, else when it appears.
+      const std::string why = error();
+      cleanup();
+      publish_empty(why.empty() ? "PipeWire disconnected" : why);
+      changed = true;
+      if (socket_exists()) (void)connect();
+    } else if (loop_ == nullptr && attempted_ && socket_appeared) {
+      changed = connect() || changed;
+    }
     return changed;
   }
+
   bool start() {
-    std::lock_guard init(initialization_);
+    std::lock_guard guard(initialization_);
     if (attempted_) return connected_.load();
     attempted_ = true;
-    try {
-      static std::once_flag initialized;
-      std::call_once(initialized, [] { pw_init(nullptr, nullptr); });
-      loop_ = pw_thread_loop_new("vw-pipewire", nullptr);
-      if (loop_ == nullptr) throw std::runtime_error("could not create PipeWire loop");
-      context_ = pw_context_new(pw_thread_loop_get_loop(loop_), nullptr, 0);
-      if (context_ == nullptr) throw std::runtime_error("could not create PipeWire context");
-      core_ = pw_context_connect(context_, pw_properties_new(
-          PW_KEY_APP_NAME, "vw", PW_KEY_APP_ID, "vw", nullptr), 0);
-      if (core_ == nullptr) throw std::runtime_error(std::string("PipeWire connection failed: ") + std::strerror(errno));
-      static const pw_core_events core_events = [] {
-        pw_core_events events{};
-        events.version = PW_VERSION_CORE_EVENTS;
-        events.done = [](void* data, std::uint32_t id, int sequence) {
-          auto* self = static_cast<Pipewire*>(data);
-          if (id == PW_ID_CORE) {
-            self->completed_ = sequence;
-            pw_thread_loop_signal(self->loop_, false);
-          }
-        };
-        events.error = [](void* data, std::uint32_t id, int, int result, const char* message) {
-          auto* self = static_cast<Pipewire*>(data);
-          self->error_ = message == nullptr ? "PipeWire error" : message;
-          if (id == PW_ID_CORE && (result == -EPIPE || result == -ECONNRESET || result == -ENOTCONN))
-            self->connected_.store(false);
-          pw_thread_loop_signal(self->loop_, false);
-          self->wake();
-        };
-        return events;
-      }();
-      pw_core_add_listener(core_, &core_listener_, &core_events, this);
-      registry_ = pw_core_get_registry(core_, PW_VERSION_REGISTRY, 0);
-      if (registry_ == nullptr) throw std::runtime_error("could not get PipeWire registry");
-      static const pw_registry_events registry_events = [] {
-        pw_registry_events events{};
-        events.version = PW_VERSION_REGISTRY_EVENTS;
-        events.global = global;
-        events.global_remove = removed;
-        return events;
-      }();
-      pw_registry_add_listener(registry_, &registry_listener_, &registry_events, this);
-      connected_.store(true);
-      if (pw_thread_loop_start(loop_) < 0) throw std::runtime_error("could not start PipeWire loop");
-      loop_started_ = true;
-      {
-        LoopLock lock(loop_);
-        timespec deadline{};
-        pw_thread_loop_get_time(loop_, &deadline, 1500000000);
-        // Registry enumeration, node binding, then subscribed properties.
-        for (int round = 0; round < 3; ++round) {
-          const int sequence = pw_core_sync(core_, PW_ID_CORE, 0);
-          if (sequence < 0) throw std::runtime_error("PipeWire registry synchronization failed");
-          while (completed_ != sequence && connected_.load()) {
-            if (pw_thread_loop_timed_wait_full(loop_, &deadline) < 0)
-              throw std::runtime_error("PipeWire registry synchronization timed out");
-          }
-          if (!connected_.load()) throw std::runtime_error(error_);
-        }
-      }
-      return true;
-    } catch (const std::exception& error) {
-      const std::string message = error.what();
-      cleanup();
-      error_ = message;
-      return false;
-    }
+    return connect();
   }
+
   std::string error() {
-    (void)start();
-    if (loop_ == nullptr) return error_;
-    LoopLock lock(loop_);
+    std::lock_guard guard(snapshot_mutex_);
     return error_;
   }
+
   std::vector<AudioNode> nodes(int filter = 0) {
-    if (!start()) return {};
-    LoopLock lock(loop_);
+    const auto current = snapshot();
     std::vector<AudioNode> result;
-    for (const auto& [id, node] : nodes_) {
-      if (filter == 1 && !sink(node->state)) continue;
-      if (filter == 2 && !source(node->state)) continue;
-      if (filter == 3 && !node->state.media_class.starts_with("Stream/")) continue;
-      result.push_back(node->state);
+    for (const auto& node : current->nodes) {
+      if (filter == 1 && !sink(node)) continue;
+      if (filter == 2 && !source(node)) continue;
+      if (filter == 3 && !node.media_class.starts_with("Stream/")) continue;
+      result.push_back(node);
     }
     return result;
   }
+
   std::optional<AudioNode> default_node(bool input) {
-    if (!start()) return {};
-    LoopLock lock(loop_);
-    const auto& name = input ? default_source_ : default_sink_;
-    for (const auto& [id, node] : nodes_)
-      if (node->state.name == name && (input ? source(node->state) : sink(node->state)))
-        return node->state;
-    if (name.empty()) for (const auto& [id, node] : nodes_)
-      if (input ? source(node->state) : sink(node->state)) return node->state;
+    const auto current = snapshot();
+    const auto& name = input ? current->default_source : current->default_sink;
+    const auto matches = [&](const AudioNode& node) { return input ? source(node) : sink(node); };
+    for (const auto& node : current->nodes)
+      if (node.name == name && matches(node)) return node;
+    if (name.empty())
+      for (const auto& node : current->nodes)
+        if (matches(node)) return node;
     return {};
   }
+
   std::pair<bool, std::string> set_volume(std::uint32_t id, double volume) {
     if (!start()) return {false, error()};
     LoopLock lock(loop_);
@@ -221,6 +206,141 @@ class Pipewire {
   }
 
  private:
+  void watch(int fd) const {
+    epoll_event event{};
+    event.events = EPOLLIN;
+    event.data.fd = fd;
+    epoll_ctl(epoll_, EPOLL_CTL_ADD, fd, &event);
+  }
+
+  // PipeWire's socket: $PIPEWIRE_REMOTE (a name or a path), else pipewire-0,
+  // in $PIPEWIRE_RUNTIME_DIR or $XDG_RUNTIME_DIR.
+  void watch_socket() {
+    const char* remote = std::getenv("PIPEWIRE_REMOTE");
+    std::filesystem::path socket = remote != nullptr && *remote != '\0' ? remote : "pipewire-0";
+    if (socket.is_relative()) {
+      const char* directory = std::getenv("PIPEWIRE_RUNTIME_DIR");
+      if (directory == nullptr || *directory == '\0') directory = std::getenv("XDG_RUNTIME_DIR");
+      if (directory == nullptr || *directory == '\0') return;
+      socket = std::filesystem::path(directory) / socket;
+    }
+    socket_path_ = socket;
+    socket_name_ = socket.filename().string();
+    inotify_ = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
+    if (inotify_ < 0) return;
+    if (inotify_add_watch(inotify_, socket.parent_path().c_str(), IN_CREATE | IN_MOVED_TO) < 0) {
+      close(inotify_);
+      inotify_ = -1;
+      return;
+    }
+    watch(inotify_);
+  }
+
+  bool socket_exists() const {
+    std::error_code ignored;
+    return !socket_path_.empty() && std::filesystem::exists(socket_path_, ignored);
+  }
+
+  std::shared_ptr<const Snapshot> snapshot() {
+    (void)start();
+    std::lock_guard guard(snapshot_mutex_);
+    if (!snapshot_) snapshot_ = std::make_shared<Snapshot>();
+    return snapshot_;
+  }
+
+  // Runs on PipeWire's thread (or with it stopped): copy the live state out
+  // and wake vw. Nothing is shown until the first full sync, so the first
+  // snapshot already has volumes and defaults.
+  void publish() {
+    if (!synced_) return;
+    auto next = std::make_shared<Snapshot>();
+    next->nodes.reserve(nodes_.size());
+    for (const auto& [id, node] : nodes_) next->nodes.push_back(node->state);
+    next->default_sink = default_sink_;
+    next->default_source = default_source_;
+    {
+      std::lock_guard guard(snapshot_mutex_);
+      snapshot_ = std::move(next);
+    }
+    wake();
+  }
+
+  void publish_empty(std::string why) {
+    std::lock_guard guard(snapshot_mutex_);
+    snapshot_ = std::make_shared<Snapshot>();
+    error_ = std::move(why);
+  }
+
+  void set_error(std::string why) {
+    std::lock_guard guard(snapshot_mutex_);
+    error_ = std::move(why);
+  }
+
+  // Connects and returns at once; the state arrives as events.
+  bool connect() {
+    try {
+      static std::once_flag initialized;
+      std::call_once(initialized, [] { pw_init(nullptr, nullptr); });
+      loop_ = pw_thread_loop_new("vw-pipewire", nullptr);
+      if (loop_ == nullptr) throw std::runtime_error("could not create PipeWire loop");
+      context_ = pw_context_new(pw_thread_loop_get_loop(loop_), nullptr, 0);
+      if (context_ == nullptr) throw std::runtime_error("could not create PipeWire context");
+      core_ = pw_context_connect(context_, pw_properties_new(
+          PW_KEY_APP_NAME, "vw", PW_KEY_APP_ID, "vw", nullptr), 0);
+      if (core_ == nullptr) throw std::runtime_error(std::string("PipeWire connection failed: ") + std::strerror(errno));
+      static const pw_core_events core_events = [] {
+        pw_core_events events{};
+        events.version = PW_VERSION_CORE_EVENTS;
+        events.done = [](void* data, std::uint32_t id, int sequence) {
+          auto* self = static_cast<Pipewire*>(data);
+          if (id != PW_ID_CORE || sequence != self->pending_) return;
+          // Three rounds: the registry, then the bound nodes and metadata,
+          // then the properties they subscribed to.
+          if (++self->rounds_ < 3) {
+            self->pending_ = pw_core_sync(self->core_, PW_ID_CORE, 0);
+            return;
+          }
+          self->synced_ = true;
+          self->publish();
+        };
+        events.error = [](void* data, std::uint32_t id, int, int result, const char* message) {
+          auto* self = static_cast<Pipewire*>(data);
+          self->set_error(message == nullptr ? "PipeWire error" : message);
+          if (id == PW_ID_CORE && (result == -EPIPE || result == -ECONNRESET || result == -ENOTCONN))
+            self->connected_.store(false);
+          self->wake();
+        };
+        return events;
+      }();
+      pw_core_add_listener(core_, &core_listener_, &core_events, this);
+      registry_ = pw_core_get_registry(core_, PW_VERSION_REGISTRY, 0);
+      if (registry_ == nullptr) throw std::runtime_error("could not get PipeWire registry");
+      static const pw_registry_events registry_events = [] {
+        pw_registry_events events{};
+        events.version = PW_VERSION_REGISTRY_EVENTS;
+        events.global = global;
+        events.global_remove = removed;
+        return events;
+      }();
+      pw_registry_add_listener(registry_, &registry_listener_, &registry_events, this);
+      synced_ = false;
+      rounds_ = 0;
+      connected_.store(true);
+      set_error({});
+      if (pw_thread_loop_start(loop_) < 0) throw std::runtime_error("could not start PipeWire loop");
+      loop_started_ = true;
+      LoopLock lock(loop_);
+      pending_ = pw_core_sync(core_, PW_ID_CORE, 0);
+      if (pending_ < 0) throw std::runtime_error("PipeWire synchronization failed");
+      return true;
+    } catch (const std::exception& error) {
+      const std::string message = error.what();
+      cleanup();
+      publish_empty(message);
+      return false;
+    }
+  }
+
   void wake() {
     const std::uint64_t one = 1;
     const auto result = write(event_, &one, sizeof(one));
@@ -243,7 +363,7 @@ class Pipewire {
         if (info->params[index].id == SPA_PARAM_Props)
           node->state.can_control = node->writable && (info->params[index].flags & SPA_PARAM_INFO_WRITE);
     }
-    if (node->state != previous) node->self->wake();
+    if (node->state != previous) node->self->publish();
   }
   static void node_param(void* data, int, std::uint32_t id, std::uint32_t, std::uint32_t,
                          const spa_pod* parameter) {
@@ -269,13 +389,13 @@ class Pipewire {
         node->state.volume_known = true;
       }
     }
-    if (node->state != previous) node->self->wake();
+    if (node->state != previous) node->self->publish();
   }
   static int metadata_property(void* data, std::uint32_t subject, const char* key,
                                 const char*, const char* value) {
     auto* self = static_cast<Pipewire*>(data);
     if (subject != PW_ID_CORE) return 0;
-    if (key == nullptr) { self->default_sink_.clear(); self->default_source_.clear(); self->wake(); return 0; }
+    if (key == nullptr) { self->default_sink_.clear(); self->default_source_.clear(); self->publish(); return 0; }
     std::string* target = nullptr;
     if (std::strcmp(key, "default.audio.sink") == 0) target = &self->default_sink_;
     if (std::strcmp(key, "default.audio.source") == 0) target = &self->default_source_;
@@ -286,7 +406,7 @@ class Pipewire {
       const auto json = nlohmann::json::parse(value, nullptr, false);
       if (json.is_object() && json.contains("name") && json["name"].is_string()) *target = json["name"].get<std::string>();
     }
-    if (*target != previous) self->wake();
+    if (*target != previous) self->publish();
     return 0;
   }
   static void global(void* data, std::uint32_t id, std::uint32_t permissions,
@@ -316,7 +436,7 @@ class Pipewire {
       pw_node_subscribe_params(node->proxy, parameters, 1);
       pw_node_enum_params(node->proxy, 0, SPA_PARAM_Props, 0, UINT32_MAX, nullptr);
       self->nodes_[id] = std::move(node);
-      self->wake();
+      self->publish();
     } else if (std::strcmp(type, PW_TYPE_INTERFACE_Metadata) == 0) {
       const char* name = properties == nullptr ? nullptr : spa_dict_lookup(properties, PW_KEY_METADATA_NAME);
       if (name == nullptr || std::strcmp(name, "default") != 0) return;
@@ -348,8 +468,9 @@ class Pipewire {
       self->default_sink_.clear(); self->default_source_.clear();
       changed = true;
     }
-    if (changed) self->wake();
+    if (changed) self->publish();
   }
+  // Stops PipeWire's thread first, so nothing below races with it.
   void cleanup() {
     connected_.store(false);
     if (loop_started_) { pw_thread_loop_stop(loop_); loop_started_ = false; }
@@ -363,6 +484,9 @@ class Pipewire {
       pw_proxy_destroy(reinterpret_cast<pw_proxy*>(metadata->proxy));
     }
     metadata_.clear();
+    default_sink_.clear();
+    default_source_.clear();
+    synced_ = false;
     if (registry_ != nullptr) {
       spa_hook_remove(&registry_listener_);
       pw_proxy_destroy(reinterpret_cast<pw_proxy*>(registry_)); registry_ = nullptr;
@@ -373,6 +497,10 @@ class Pipewire {
   }
 
   int event_;
+  int epoll_;
+  int inotify_ = -1;
+  std::filesystem::path socket_path_;
+  std::string socket_name_;
   std::mutex initialization_;
   std::atomic_bool connected_ = false;
   bool attempted_ = false, loop_started_ = false;
@@ -381,10 +509,17 @@ class Pipewire {
   pw_core* core_ = nullptr;
   pw_registry* registry_ = nullptr;
   spa_hook core_listener_{}, registry_listener_{};
-  int completed_ = -1;
+  // PipeWire's thread only, or with it stopped.
+  int pending_ = -1;
+  int rounds_ = 0;
+  bool synced_ = false;
   std::map<std::uint32_t, std::unique_ptr<Bound>> nodes_;
   std::map<std::uint32_t, std::unique_ptr<Metadata>> metadata_;
-  std::string default_sink_, default_source_, error_;
+  std::string default_sink_, default_source_;
+  // Shared with readers.
+  std::mutex snapshot_mutex_;
+  std::shared_ptr<const Snapshot> snapshot_;
+  std::string error_;
 };
 
 Pipewire& service() { static Pipewire instance; return instance; }

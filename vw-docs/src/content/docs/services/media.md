@@ -30,3 +30,5 @@ Player state is refreshed from player signals on a background thread; position i
 | `set_default_sink(id)`, `set_default_source(id)` | change defaults |
 
 `Node` has `id`, `name`, `description`, `media_class`, `app_name`, `state`, `channel_volumes`, `muted`, `can_control`, plus `volume()` (perceptual) and `linear_volume()`. Writes return a `Result {ok, error}`.
+
+The service runs entirely on PipeWire's events; nothing polls. Reads return the latest snapshot and never wait on PipeWire, so right after start the lists are empty for a moment and fill in with an event. When PipeWire restarts, devices disappear, then come back as soon as its socket reappears — keep `event_fd()` registered, since reconnecting happens in `drain_events()`.
