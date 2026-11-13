@@ -314,6 +314,9 @@ class Generator {
   // --- views ----------------------------------------------------------------
   void generate(const View& view) {
     parameters_ = view.parameters;
+    view_ = view.name;
+    view_ids_.clear();
+    collect_ids(view.body, false);
     Scope scope(*this, view.parameters);
     boxes_ = {Box{}};
     const bool surface = view.body.size() == 1 && view.body.front()->kind == Node::Kind::element &&
@@ -344,6 +347,8 @@ class Generator {
   // Emits the nodes into a fresh vector of widgets and returns its name.
   // With `flex`, flex children are left as slots for the caller to fill.
   std::string block(const Block& nodes, std::vector<FlexSlot>* flex = nullptr) {
+    // Names given inside the block stay in it; below it they are read ahead.
+    Scope scope(*this);
     const std::string list = fresh("children");
     line(nodes.empty() ? Location{} : nodes.front()->at, std::format("std::vector<vw::Widget> {};", list));
     for (const auto& node : nodes) statement(*node, list, flex);
@@ -419,6 +424,7 @@ class Generator {
           const std::string widget = element(node);
           if (!widget.empty()) {
             line(node.at, std::format("facet::measure(ui, {}, {});", id->value->text, widget));
+            remember(*id);
             line(node.at, std::format("{}.push_back({});", list, widget));
           }
           return;
@@ -624,7 +630,10 @@ class Generator {
             const std::string share = std::format("{} * {} / ({})", spare, slot.weight, total);
             const std::string built = element(*slot.node, std::pair{axis, share});
             if (const Argument* id = element_id(*slot.node))
+            {
               line(slot.node->at, std::format("facet::measure(ui, {}, {});", id->value->text, built));
+              remember(*id);
+            }
             line(slot.node->at, std::format("{}[{}] = {};", children, slot.slot, built));
             --indent_;
             line(slot.node->at, "}");
@@ -978,6 +987,15 @@ class Generator {
         if (lambdas_ > 0 && parameter(value.text) && !shadowed(value.text)) return "(*" + reference(value.text) + ")";
         // The monitor being drawn on, unless the view names something screen.
         if (value.text == "screen" && !local(value.text) && !parameter(value.text)) return "facet::screen()";
+        // An element named further down (or inside another block): its box
+        // from the previous frame.
+        if (!local(value.text) && !parameter(value.text))
+          if (const auto found = view_ids_.find(value.text); found != view_ids_.end()) {
+            if (found->second != Seen::once)
+              throw Error(value.at, std::format("'{}' is {}, so it cannot be read before or outside it", value.text,
+                                                found->second == Seen::looped ? "named inside a loop" : "named more than once"));
+            return std::format("facet::previous({})", quote(id_key(value.text)));
+          }
         return value.text;
       case K::member:
         if (value.text == "length") return std::format("std::size({})", expression(*value.operands[0]));
@@ -1020,6 +1038,33 @@ class Generator {
   std::vector<std::set<std::string>> scopes_;
   std::set<std::string> constants_;      // file-level let
   std::set<std::string> element_names_;  // every id: name so far
+  // Every element name in the view being generated, found before generating
+  // it, for reading names ahead of where they are given.
+  enum class Seen : std::uint8_t { once, looped, repeated };
+  std::map<std::string, Seen> view_ids_;
+  std::string view_;
+
+  void collect_ids(const Block& nodes, bool looped) {
+    for (const auto& node : nodes) {
+      if (node->kind == Node::Kind::element)
+        if (const Argument* id = argument(*node, "id"); id != nullptr && id->value->kind == Expr::Kind::identifier) {
+          const auto [entry, added] = view_ids_.emplace(id->value->text, looped ? Seen::looped : Seen::once);
+          if (!added) entry->second = Seen::repeated;
+        }
+      const bool inner = looped || node->kind == Node::Kind::for_ || node->kind == Node::Kind::render;
+      collect_ids(node->children, inner);
+      collect_ids(node->otherwise, inner);
+    }
+  }
+
+  std::string id_key(const std::string& name) const { return std::format("{}:{}.{}", source_, view_, name); }
+
+  // Keeps an element's measured box for the names read ahead of it.
+  void remember(const Argument& id) {
+    const auto found = view_ids_.find(id.value->text);
+    if (found == view_ids_.end() || found->second != Seen::once) return;
+    line(id.at, std::format("facet::remember({}, {});", quote(id_key(id.value->text)), id.value->text));
+  }
   std::vector<std::string> keys_;
   std::vector<Box> boxes_;
   std::ostringstream out_;

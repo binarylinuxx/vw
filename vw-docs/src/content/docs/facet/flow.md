@@ -76,7 +76,21 @@ The box depends on where you read it:
 - **Inside the element** (its children), it is what the element asked for: `bar.width` above is the monitor's width, because `width: 0` fills it. A size left unset is `0` there.
 - **After the element** (later siblings, and anything below it), it is the **measured** box: `title.width` is the width the text actually came out at, and `row.width` the row as laid out.
 
-A name is seen only below where it is given; there is no referring forward. Positions of children inside a `Row`, `Column` or `Grid` are final only once that layout is built, so their siblings see where they were made, not where the layout puts them. Two elements in one block cannot share a name.
+Positions of children inside a `Row`, `Column` or `Grid` are final only once that layout is built, so their siblings see where they were made, not where the layout puts them. Two elements in one block cannot share a name.
+
+### Reading a name ahead
+
+A name can also be used above the element that gives it, or outside the block it is in:
+
+```facet
+layout.Row(gap: 8) {
+    // an underline as wide as the clock, which comes after it
+    ui.Rectangle(width: clock.width, height: 2, color: "#a7cbe7")
+    ui.Text(id: clock, text: state.time)
+}
+```
+
+Read ahead, a name gives the box the element had in the previous frame: `x`, `y`, `width`, `height`, and `built`, false until it has been drawn once. When a remembered box changes, vw draws one more frame, so a layout that depends on later elements settles straight away and then stops. There is no `props` this way. A name given inside a loop, or twice in a view, cannot be read ahead: which one would it be?
 
 On a control, `id: "search"` (a string) or a variable still sets the control's state key, as before; only a name not already in use names the element.
 

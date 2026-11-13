@@ -118,6 +118,38 @@ void measure(vw::Ui& ui, Named<Props>& named, const vw::Widget& widget) {
   named.built = true;
 }
 
+// A name read before (or outside) the element that gives it: the box that
+// element had last frame. remember() asks for another frame when a box
+// changes, so a layout that depends on later elements settles at once.
+struct Box {
+  float x = 0;
+  float y = 0;
+  float width = 0;
+  float height = 0;
+  bool built = false;  // false until the element has been built once
+  bool operator==(const Box&) const = default;
+};
+
+inline std::unordered_map<std::string, Box>& remembered_boxes() {
+  static std::unordered_map<std::string, Box> boxes;
+  return boxes;
+}
+
+inline Box previous(const std::string& key) {
+  const auto& boxes = remembered_boxes();
+  const auto found = boxes.find(key);
+  return found == boxes.end() ? Box{} : found->second;
+}
+
+template <class Props>
+void remember(const std::string& key, const Named<Props>& named) {
+  const Box next{named.x, named.y, named.width, named.height, true};
+  Box& kept = remembered_boxes()[key];
+  if (kept == next) return;
+  kept = next;
+  vw::request_animation_continuation();
+}
+
 inline vw::Widget nothing(vw::Ui& ui) {
   vw::HitAreaProps area;
   area.width = area.height = 1;
