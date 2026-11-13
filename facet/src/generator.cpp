@@ -297,7 +297,7 @@ class Generator {
     const Argument* id = element_id(node);
     if (id == nullptr) return;
     const std::string& name = id->value->text;
-    line(id->at, std::format("[[maybe_unused]] const auto& {} = {};", name, props));
+    line(id->at, std::format("facet::Named {}{{{}}};", name, props));
     declare(name);
     element_names_.insert(name);
   }
@@ -416,7 +416,11 @@ class Generator {
           // No braces: the elements after this one may use its name.
           if (scopes_.back().contains(id->value->text))
             throw Error(id->at, "id '" + id->value->text + "' is already used here");
-          line(node.at, std::format("{}.push_back({});", list, element(node)));
+          const std::string widget = element(node);
+          if (!widget.empty()) {
+            line(node.at, std::format("facet::measure(ui, {}, {});", id->value->text, widget));
+            line(node.at, std::format("{}.push_back({});", list, widget));
+          }
           return;
         }
         line(node.at, "{");
@@ -618,8 +622,10 @@ class Generator {
             line(slot.node->at, "{");
             ++indent_;
             const std::string share = std::format("{} * {} / ({})", spare, slot.weight, total);
-            line(slot.node->at, std::format("{}[{}] = {};", children, slot.slot,
-                                            element(*slot.node, std::pair{axis, share})));
+            const std::string built = element(*slot.node, std::pair{axis, share});
+            if (const Argument* id = element_id(*slot.node))
+              line(slot.node->at, std::format("facet::measure(ui, {}, {});", id->value->text, built));
+            line(slot.node->at, std::format("{}[{}] = {};", children, slot.slot, built));
             --indent_;
             line(slot.node->at, "}");
           }

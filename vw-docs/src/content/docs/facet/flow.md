@@ -51,18 +51,32 @@ view Bar(state) {
 
 ## Naming elements: id
 
-`id:` with a bare name gives an element a name. Its children and the elements after it in the same block read its properties through that name, so sizes and positions can follow one another instead of being repeated numbers:
+`id:` with a bare name gives an element a name. Its children and the elements after it in the same block read its box through that name, so sizes and positions follow one another instead of being repeated numbers:
 
 ```facet
-S.Surface(id: panel, width: 200, height: 100) {
-    S.Text(text: "Hello", place: { x: 20, y: gap })
-    // bottom centre of the panel, whatever its size
-    S.Button(label: "Click me",
-             place: { x: (panel.width - 120) / 2, y: panel.height - 24 - gap })
+let gap = 8
+
+ui.Surface(id: bar, width: 0, height: 32, anchor: top) {
+    layout.Row(id: row, width: bar.width - gap * 2, height: bar.height, gap: gap, align: center) {
+        ui.Text(id: title, text: state.title)
+        // whatever the title leaves of the row
+        ui.Rectangle(width: row.width - title.width - gap, height: 4, color: "#a7cbe7")
+    }
 }
 ```
 
-The name stands for the element's props: what it was given, plus the defaults of its props struct, as C++ sees them (`panel.width` is `SurfaceProps::width`). It is not measured layout, so a Text's width is not known through its id. Two elements in one block cannot share a name.
+| Through the name | Is |
+| --- | --- |
+| `x`, `y`, `width`, `height` | plain numbers, for any element |
+| `props` | everything the element was given, plus its defaults: `panel.props.variant` |
+| `built` | whether the box is measured yet |
+
+The box depends on where you read it:
+
+- **Inside the element** (its children), it is what the element asked for: `bar.width` above is the monitor's width, because `width: 0` fills it. A size left unset is `0` there.
+- **After the element** (later siblings, and anything below it), it is the **measured** box: `title.width` is the width the text actually came out at, and `row.width` the row as laid out.
+
+A name is seen only below where it is given; there is no referring forward. Positions of children inside a `Row`, `Column` or `Grid` are final only once that layout is built, so their siblings see where they were made, not where the layout puts them. Two elements in one block cannot share a name.
 
 On a control, `id: "search"` (a string) or a variable still sets the control's state key, as before; only a name not already in use names the element.
 

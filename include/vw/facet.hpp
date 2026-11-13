@@ -60,6 +60,64 @@ inline Screen screen() {
           static_cast<float>(output.refresh) / 1000.0F};
 }
 
+// What `id: name` names: the element's box as plain numbers, and its props.
+// While the element is being built (inside its children) the box is what its
+// props ask for; once it is built, the elements after it see the measured
+// box, so `title.width` is the width the text came out at.
+template <class Props>
+struct Named {
+  Props props;
+  float x = 0;
+  float y = 0;
+  float width = 0;
+  float height = 0;
+  bool built = false;  // the box is measured, not declared
+
+  explicit Named(const Props& given) : props(given) {
+    const auto number = [](const auto& value) -> float {
+      using Value = std::decay_t<decltype(value)>;
+      if constexpr (std::is_arithmetic_v<Value>) {
+        return static_cast<float>(value);
+      } else if constexpr (requires { value.has_value(); *value; }) {
+        if constexpr (std::is_arithmetic_v<std::decay_t<decltype(*value)>>)
+          return value ? static_cast<float>(*value) : 0.0F;
+        else
+          return 0.0F;
+      } else {
+        return 0.0F;
+      }
+    };
+    if constexpr (requires { props.width; }) width = number(props.width);
+    if constexpr (requires { props.height; }) height = number(props.height);
+    if constexpr (requires { props.place.x; }) x = number(props.place.x);
+    if constexpr (requires { props.place.y; }) y = number(props.place.y);
+    if constexpr (std::is_same_v<Props, vw::SurfaceProps>) {
+      // 0 fills the output along that axis.
+      const vw::Output output = vw::current_output();
+      if (props.width && *props.width == 0) width = static_cast<float>(output.width);
+      if (props.height && *props.height == 0) height = static_cast<float>(output.height);
+    }
+  }
+};
+
+// The built element's measured box: its size, and where its first drawn
+// primitive sits. Children of a Row, Column or Grid are moved when the layout
+// finishes, after their siblings were built.
+template <class Props>
+void measure(vw::Ui& ui, Named<Props>& named, const vw::Widget& widget) {
+  named.width = widget.width;
+  named.height = widget.height;
+  const auto& rectangles = ui.scene().rectangles;
+  bool found = false;
+  for (std::size_t index = widget.begin; index < widget.end && index < rectangles.size(); ++index) {
+    const auto& rectangle = rectangles[index];
+    named.x = found ? std::min(named.x, rectangle.x) : rectangle.x;
+    named.y = found ? std::min(named.y, rectangle.y) : rectangle.y;
+    found = true;
+  }
+  named.built = true;
+}
+
 inline vw::Widget nothing(vw::Ui& ui) {
   vw::HitAreaProps area;
   area.width = area.height = 1;
