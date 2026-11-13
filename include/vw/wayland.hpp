@@ -109,6 +109,13 @@ class WaylandWidget {
   zwayland::client::Proxy* compositor_ = nullptr;
   zwayland::client::Proxy* dmabuf_ = nullptr;
   zwayland::client::Proxy* focus_grab_manager_ = nullptr;
+  // wp_cursor_shape: the manager, this pointer's device, the serial of the
+  // last pointer enter, and the shape last set (0 none yet).
+  zwayland::client::Proxy* cursor_shape_manager_ = nullptr;
+  zwayland::client::Proxy* cursor_device_ = nullptr;
+  std::uint32_t pointer_serial_ = 0;
+  std::uint32_t cursor_shape_ = 0;
+  void set_cursor(std::uint32_t shape);
   zwayland::client::Proxy* focus_grab_ = nullptr;
   bool focus_grab_requested_ = false;
   struct PendingFocus { bool activated; std::uint32_t reason; };

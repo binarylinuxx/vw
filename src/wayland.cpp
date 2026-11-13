@@ -7,6 +7,7 @@
 
 #include <wlr-data-control-unstable-v1-zwayland-client.h>
 #include <zwwm-focus-grab-v1-zwayland-client.h>
+#include <cursor-shape-zwayland-client.h>
 #include <linux-dmabuf-zwayland-client.h>
 #include <wayland-zwayland-client.h>
 #include <zwayland/client/core.hpp>
@@ -92,6 +93,8 @@ struct Globals {
   std::uint32_t data_device_manager_version = 0;
   std::uint32_t data_control_manager = 0;
   std::uint32_t data_control_manager_version = 0;
+  std::uint32_t cursor_shape_manager = 0;
+  std::uint32_t cursor_shape_manager_version = 0;
 
   void global(client::Proxy&, std::uint32_t name, const std::string& interface,
               std::uint32_t version) {
@@ -113,6 +116,9 @@ struct Globals {
     } else if (interface == generated::zwlr_data_control_manager_v1_interface.name) {
       data_control_manager = name;
       data_control_manager_version = version;
+    } else if (interface == generated::wp_cursor_shape_manager_v1_interface.name) {
+      cursor_shape_manager = name;
+      cursor_shape_manager_version = version;
     } else {
       role->global(name, interface, version);
     }
@@ -238,6 +244,12 @@ void WaylandWidget::discover_globals() {
       generated::zwp_linux_dmabuf_v1_interface, std::min(3U, globals.dmabuf_version));
   if (compositor_ == nullptr || dmabuf_ == nullptr)
     throw std::runtime_error("could not bind required Wayland globals");
+  // Over vw's surfaces the cursor is vw's to set; cursor-shape names it and
+  // the compositor draws it from its theme.
+  if (globals.cursor_shape_manager != 0)
+    cursor_shape_manager_ = client::core::bind(*display_, *registry, globals.cursor_shape_manager,
+        generated::wp_cursor_shape_manager_v1_interface,
+        std::min(globals.cursor_shape_manager_version, generated::wp_cursor_shape_manager_v1_interface.version));
   if (globals.seat != 0) {
     seat_ = client::core::bind(*display_, *registry, globals.seat, generated::wl_seat_interface,
                                std::min(globals.seat_version, generated::wl_seat_interface.version));
@@ -541,14 +553,25 @@ void WaylandWidget::create_pointer() {
   const std::uint32_t pointer_id = generated::wl_seat_get_pointer(*display_, seat_->id);
   pointer_ = display_->find_proxy(pointer_id);
   if (pointer_ == nullptr) throw std::runtime_error("could not create wl_pointer");
+  if (cursor_shape_manager_ != nullptr) {
+    const std::uint32_t device = generated::wp_cursor_shape_manager_v1_get_pointer(
+        *display_, cursor_shape_manager_->id, pointer_);
+    cursor_device_ = display_->find_proxy(device);
+  }
   struct PointerEvents {
     WaylandWidget* widget;
     double vertical = 0.0;
     std::int32_t vertical_120 = 0;
     bool has_120 = false;
-    void enter(client::Proxy&, std::uint32_t, client::Proxy* surface, double x, double y) {
+    void enter(client::Proxy&, std::uint32_t serial, client::Proxy* surface, double x, double y) {
       if (surface != nullptr) widget->role_->pointer_enter(surface->id);
-      if (surface != widget->surface_) return;
+      // Every surface of ours shows a cursor, lock surfaces included.
+      widget->pointer_serial_ = serial;
+      widget->cursor_shape_ = 0;
+      if (surface != widget->surface_) {
+        widget->set_cursor(generated::WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT);
+        return;
+      }
       widget->pointer_inside_ = true;
       widget->pointer_motion(x, y);
     }
@@ -714,6 +737,21 @@ void WaylandWidget::pointer_motion(double x, double y) {
       break;
     }
   }
+  // The cursor says what is under it: a hand over what clicks or drags, a
+  // text cursor over a text field, the arrow elsewhere.
+  if (pointer_inside_) {
+    std::uint32_t shape = generated::WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT;
+    const int under = dragging_ ? pressed_ : next;
+    if (!text_drag_id_.empty()) {
+      shape = generated::WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_TEXT;
+    } else if (under >= 0 && static_cast<std::size_t>(under) < scene_.interactions.size()) {
+      const Interaction& interaction = scene_.interactions[static_cast<std::size_t>(under)];
+      if (interaction.text_field >= 0) shape = generated::WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_TEXT;
+      else if (interaction.on_click || interaction.on_drag_start || interaction.on_drag)
+        shape = generated::WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_POINTER;
+    }
+    set_cursor(shape);
+  }
   // Passive hover handlers track containment, not the topmost widget.
   std::vector<std::pair<HoverHandler, bool>> crossings;
   for (Interaction& interaction : scene_.interactions) {
@@ -742,6 +780,12 @@ void WaylandWidget::pointer_motion(double x, double y) {
   if (crossings.empty()) return;
   for (const auto& [handler, inside] : crossings) invoke(handler, "hover", inside);
   refresh_scene();
+}
+
+void WaylandWidget::set_cursor(std::uint32_t shape) {
+  if (cursor_device_ == nullptr || pointer_serial_ == 0 || shape == cursor_shape_) return;
+  cursor_shape_ = shape;
+  generated::wp_cursor_shape_device_v1_set_shape(*display_, cursor_device_->id, pointer_serial_, shape);
 }
 
 void WaylandWidget::pointer_leave() {
