@@ -212,10 +212,14 @@ inline float tween(const std::string& id, double target, double milliseconds,
 
 // A rectangle with content: the content centred on top of it. Without
 // content (an if that drew nothing) it is just the rectangle.
-inline vw::Widget on(vw::Ui& ui, const vw::Widget& base, const std::vector<vw::Widget>& children) {
+// A Rectangle's children, centred on it and clipped to its rounded shape.
+inline vw::Widget on(vw::Ui& ui, const vw::Widget& base, const std::vector<vw::Widget>& children,
+                     float radius = 0.0F) {
   if (children.empty()) return base;
   const vw::Widget content = children.size() == 1 ? children.front() : ui.column(children, {});
-  return ui.stack({base, content}, sized(base.width, base.height));
+  vw::StackProps props = sized(base.width, base.height);
+  props.radius = radius;
+  return ui.stack({base, content}, props);
 }
 
 inline vw::Widget row(vw::Ui& ui, const std::vector<vw::Widget>& children, const vw::LayoutProps& props) {

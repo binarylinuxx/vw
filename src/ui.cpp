@@ -647,8 +647,17 @@ Widget Ui::close_group(std::span<const Widget> children, float width, float heig
   const std::array<float, 4> parent_clip{style.x, style.y, width, height};
   for (std::size_t index = group.begin; index < group.end; ++index) {
     auto& rectangle = scene_.rectangles[index];
-    rectangle.clip = parent_clip;
-    rectangle.clip_radius = style.radius;
+    // A child clipped already (ui.clip, place.clip, a nested layout) keeps
+    // that clip inside the group's; only one radius fits, so the box that
+    // bounds the result gives it.
+    if (rectangle.clip[2] > 0.0F && rectangle.clip[3] > 0.0F) {
+      const auto inner = rectangle.clip;
+      rectangle.clip = intersect_clip(inner, parent_clip);
+      if (rectangle.clip != inner) rectangle.clip_radius = style.radius;
+    } else {
+      rectangle.clip = parent_clip;
+      rectangle.clip_radius = style.radius;
+    }
     rectangle.anchor = style.anchor;
     rectangle.layer = style.layer;
     rectangle.margin = style.margin;

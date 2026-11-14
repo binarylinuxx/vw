@@ -44,11 +44,14 @@ void main() {
   ivec2 destination = ivec2(floor(rectangle.bounds.xy)) + local;
   if (any(lessThan(destination, ivec2(0))) ||
       any(greaterThanEqual(destination, imageSize(target_image)))) return;
+  // The clip edge is anti-aliased like the rectangle's own.
+  float clip_coverage = 1.0;
   if (rectangle.clip.z > 0.0 && rectangle.clip.w > 0.0) {
     vec2 clip_point = vec2(destination) + vec2(0.5) - rectangle.clip.xy;
     vec2 clip_half = rectangle.clip.zw * 0.5;
-    if (rounded_box_distance(clip_point - clip_half, clip_half,
-                             rectangle.clip_params.x) > 0.0) return;
+    clip_coverage = 1.0 - smoothstep(-0.5, 0.5,
+        rounded_box_distance(clip_point - clip_half, clip_half, rectangle.clip_params.x));
+    if (clip_coverage <= 0.0) return;
   }
   float gradient_position = rectangle.params.z == 1.0
       ? point.x / rectangle.bounds.z
@@ -60,7 +63,7 @@ void main() {
       : 0.0;
   vec4 source = vec4(fill_color.rgb * fill_alpha +
                          rectangle.border_color.rgb * border_alpha,
-                     fill_alpha + border_alpha);
+                     fill_alpha + border_alpha) * clip_coverage;
   vec4 current = imageLoad(target_image, destination);
   imageStore(target_image, destination,
              source + current * (1.0 - source.a));

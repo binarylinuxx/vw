@@ -10,7 +10,7 @@ description: Все элементы vw.ui и vw.layout и их свойства
 | Элемент | Свойства |
 | --- | --- |
 | `Surface` | `width`, `height`, `anchor` (`center`, `top`, `bottom`, `left`, `right`, `top_left`, … `fill`), `layer` (`background`, `bottom`, `top`, `overlay`), `exclusive_zone`, `namespace`, `refresh`, `output` (имя монитора) |
-| `Rectangle` | `width`, `height`, `radius`, `color`/`bg`, `color2` и `gradient` (`horizontal`, `vertical`), `border_width`, `border_color`, `input`; дети лежат на нём по центру |
+| `Rectangle` | `width`, `height`, `radius`, `color`/`bg`, `color2` и `gradient` (`horizontal`, `vertical`), `border_width`, `border_color`, `input`; дети лежат на нём по центру и обрезаются по его скруглённой форме |
 | `Text` | `text` (или первым), `font`, `size`, `weight` (`thin` … `black`), `color`, `max_width`, `max_lines`, `align`, `padding`, `input` |
 | `Image` | `path` (или первым), `icon`, `width`, `height`, `fit` (`stretch`, `contain`, `cover`), `radius`, `padding`, `input`; пустой путь сохраняет размер |
 | `TextField` | `id`, `value`, `placeholder`, `width`, `height`, `radius`, `color`, `border_color`, `focus_color`, `text_color`, `placeholder_color`, `font`, `size`, `password`, `autofocus`, `on_change`, `on_submit` |

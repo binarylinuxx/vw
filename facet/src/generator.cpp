@@ -574,7 +574,7 @@ class Generator {
           boxes_.push_back({props + ".width", props + ".height"});
           const std::string children = block(node.children);
           boxes_.pop_back();
-          line(node.at, std::format("{0} = facet::on(ui, {0}, {1});", widget, children));
+          line(node.at, std::format("{0} = facet::on(ui, {0}, {1}, {2}.radius);", widget, children, props));
         }
         return widget;
       }

@@ -18,6 +18,16 @@ ui.clip(card, {.x = x, .y = y, .width = w, .height = shown_height, .radius = 24}
 
 Everything in the range, and its input, is clipped to the rounded box; primitives entirely outside are hidden. This is how a card's contents stay inside the card while its height animates. A single primitive can also be clipped at creation with `place.clip`.
 
+Clips nest. Layouts (`stack`, `row`, `column`, `grid`) clip their children to their own box and `radius`, and a child that was clipped already keeps its clip inside that box. A rectangle laid over a rounded one is cut to the rounded shape by stacking them with the same radius:
+
+```cpp
+const vw::Widget card = ui.rectangle({.width = 200, .height = 120, .radius = 28, .color = surface});
+const vw::Widget band = ui.rectangle({.width = 260, .height = 60, .color = primary});
+ui.stack({card, band}, {.width = 200, .height = 120, .radius = 28});
+```
+
+Only one radius applies to a clip: where two clips meet, the box that bounds the result gives it. Clip edges are anti-aliased like a rectangle's own.
+
 To build one widget out of several helpers, bracket them: create a zero-sized `hit_area` before and after and take the range between — or use a layout (`stack`, `column`) that returns one widget.
 
 ## Fade a widget
