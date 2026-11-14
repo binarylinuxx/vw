@@ -214,6 +214,8 @@ Widget Ui::push(std::size_t begin, float width, float height, const Rectangle& s
   interaction.on_drag = input.on_drag;
   interaction.on_drag_end = input.on_drag_end;
   interaction.on_scroll = input.on_scroll;
+  interaction.on_scroll_x = input.on_scroll_x;
+  interaction.on_touch = input.on_touch;
   interaction.on_hover = input.on_hover;
   interaction.drag_button = input.drag_button;
   if (input.hover) {
@@ -224,7 +226,8 @@ Widget Ui::push(std::size_t begin, float width, float height, const Rectangle& s
   }
   if (style.visible && (interaction.on_click || interaction.has_hover_color ||
                         interaction.hover_scale != 1.0F || interaction.draggable() ||
-                        interaction.on_scroll || interaction.on_hover)) {
+                        interaction.on_scroll || interaction.on_scroll_x || interaction.on_touch ||
+                        interaction.on_hover)) {
     for (std::size_t index = begin; index < scene_.rectangles.size(); ++index)
       interaction.original_colors.push_back(scene_.rectangles[index].color);
     scene_.interactions.push_back(std::move(interaction));

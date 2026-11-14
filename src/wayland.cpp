@@ -8,6 +8,7 @@
 #include <wlr-data-control-unstable-v1-zwayland-client.h>
 #include <zwwm-focus-grab-v1-zwayland-client.h>
 #include <cursor-shape-zwayland-client.h>
+#include <text-input-v3-zwayland-client.h>
 #include <linux-dmabuf-zwayland-client.h>
 #include <wayland-zwayland-client.h>
 #include <zwayland/client/core.hpp>
@@ -95,6 +96,8 @@ struct Globals {
   std::uint32_t data_control_manager_version = 0;
   std::uint32_t cursor_shape_manager = 0;
   std::uint32_t cursor_shape_manager_version = 0;
+  std::uint32_t text_input_manager = 0;
+  std::uint32_t text_input_manager_version = 0;
 
   void global(client::Proxy&, std::uint32_t name, const std::string& interface,
               std::uint32_t version) {
@@ -119,6 +122,9 @@ struct Globals {
     } else if (interface == generated::wp_cursor_shape_manager_v1_interface.name) {
       cursor_shape_manager = name;
       cursor_shape_manager_version = version;
+    } else if (interface == generated::zwp_text_input_manager_v3_interface.name) {
+      text_input_manager = name;
+      text_input_manager_version = version;
     } else {
       role->global(name, interface, version);
     }
@@ -250,6 +256,12 @@ void WaylandWidget::discover_globals() {
     cursor_shape_manager_ = client::core::bind(*display_, *registry, globals.cursor_shape_manager,
         generated::wp_cursor_shape_manager_v1_interface,
         std::min(globals.cursor_shape_manager_version, generated::wp_cursor_shape_manager_v1_interface.version));
+  // The on-screen keyboard (or any input method) talks to text fields
+  // through text-input-v3.
+  if (globals.text_input_manager != 0)
+    text_input_manager_ = client::core::bind(*display_, *registry, globals.text_input_manager,
+        generated::zwp_text_input_manager_v3_interface,
+        std::min(globals.text_input_manager_version, generated::zwp_text_input_manager_v3_interface.version));
   if (globals.seat != 0) {
     seat_ = client::core::bind(*display_, *registry, globals.seat, generated::wl_seat_interface,
                                std::min(globals.seat_version, generated::wl_seat_interface.version));
@@ -260,6 +272,7 @@ void WaylandWidget::discover_globals() {
         if ((capabilities & generated::WL_SEAT_CAPABILITY_POINTER) != 0U) create_pointer();
         if ((capabilities & generated::WL_SEAT_CAPABILITY_KEYBOARD) != 0U)
           widget->create_keyboard();
+        if ((capabilities & generated::WL_SEAT_CAPABILITY_TOUCH) != 0U) widget->create_touch();
       }
       void name(client::Proxy&, const std::string&) {}
 
@@ -267,6 +280,7 @@ void WaylandWidget::discover_globals() {
       void create_pointer() { widget->create_pointer(); }
     };
     seat_->set_observer(generated::wl_seat_observer(SeatEvents{this}));
+    if (text_input_manager_ != nullptr) create_text_input();
     if (globals.data_device_manager != 0) {
       data_manager_ = client::core::bind(*display_, *registry, globals.data_device_manager,
           generated::wl_data_device_manager_interface,
@@ -563,6 +577,9 @@ void WaylandWidget::create_pointer() {
     double vertical = 0.0;
     std::int32_t vertical_120 = 0;
     bool has_120 = false;
+    double horizontal = 0.0;
+    std::int32_t horizontal_120 = 0;
+    bool has_horizontal_120 = false;
     void enter(client::Proxy&, std::uint32_t serial, client::Proxy* surface, double x, double y) {
       if (surface != nullptr) widget->role_->pointer_enter(surface->id);
       // Every surface of ours shows a cursor, lock surfaces included.
@@ -593,6 +610,11 @@ void WaylandWidget::create_pointer() {
         widget->pointer_button(button, state);
     }
     void axis(client::Proxy& proxy, std::uint32_t, std::uint32_t axis, double value) {
+      if (axis == generated::WL_POINTER_AXIS_HORIZONTAL_SCROLL) {
+        if (proxy.version < 5) widget->pointer_axis_horizontal(value);
+        else horizontal += value;
+        return;
+      }
       if (axis != generated::WL_POINTER_AXIS_VERTICAL_SCROLL) return;
       if (proxy.version < 5) widget->pointer_axis(value);
       else vertical += value;
@@ -600,9 +622,14 @@ void WaylandWidget::create_pointer() {
     void frame(client::Proxy&) {
       if (has_120) widget->pointer_axis(static_cast<double>(vertical_120) / 120.0 * 40.0);
       else if (vertical != 0.0) widget->pointer_axis(vertical);
+      if (has_horizontal_120) widget->pointer_axis_horizontal(static_cast<double>(horizontal_120) / 120.0 * 40.0);
+      else if (horizontal != 0.0) widget->pointer_axis_horizontal(horizontal);
       vertical = 0.0;
       vertical_120 = 0;
       has_120 = false;
+      horizontal = 0.0;
+      horizontal_120 = 0;
+      has_horizontal_120 = false;
     }
     void axis_source(client::Proxy&, std::uint32_t) {}
     void axis_stop(client::Proxy&, std::uint32_t, std::uint32_t) {}
@@ -611,6 +638,9 @@ void WaylandWidget::create_pointer() {
       if (axis == generated::WL_POINTER_AXIS_VERTICAL_SCROLL) {
         vertical_120 += value120;
         has_120 = true;
+      } else if (axis == generated::WL_POINTER_AXIS_HORIZONTAL_SCROLL) {
+        horizontal_120 += value120;
+        has_horizontal_120 = true;
       }
     }
     void axis_relative_direction(client::Proxy&, std::uint32_t, std::uint32_t) {}
@@ -739,7 +769,7 @@ void WaylandWidget::pointer_motion(double x, double y) {
   }
   // The cursor says what is under it: a hand over what clicks or drags, a
   // text cursor over a text field, the arrow elsewhere.
-  if (pointer_inside_) {
+  if (pointer_inside_ && !touch_id_.has_value()) {
     std::uint32_t shape = generated::WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT;
     const int under = dragging_ ? pressed_ : next;
     if (!text_drag_id_.empty()) {
@@ -786,6 +816,345 @@ void WaylandWidget::set_cursor(std::uint32_t shape) {
   if (cursor_device_ == nullptr || pointer_serial_ == 0 || shape == cursor_shape_) return;
   cursor_shape_ = shape;
   generated::wp_cursor_shape_device_v1_set_shape(*display_, cursor_device_->id, pointer_serial_, shape);
+}
+
+// Touch drives the same widgets as the pointer, one finger at a time: a tap
+// clicks, a drag on something draggable (or in a text field) drags it, and a
+// swipe anywhere else scrolls what is under it. Other fingers are ignored
+// until the first one lifts.
+void WaylandWidget::create_touch() {
+  if (touch_ != nullptr) return;
+  const std::uint32_t touch_id = generated::wl_seat_get_touch(*display_, seat_->id);
+  touch_ = display_->find_proxy(touch_id);
+  if (touch_ == nullptr) throw std::runtime_error("could not create wl_touch");
+  struct TouchEvents {
+    WaylandWidget* widget;
+    void down(client::Proxy&, std::uint32_t serial, std::uint32_t, client::Proxy* surface, std::int32_t id,
+              double x, double y) {
+      if (surface != nullptr) widget->role_->pointer_enter(surface->id);
+      if (surface != widget->surface_) return;
+      widget->input_serial_ = serial;
+      clipboard_surface = widget;
+      // A widget with on_touch takes the finger whole.
+      for (std::size_t index = widget->scene_.interactions.size(); index > 0; --index) {
+        const Interaction& interaction = widget->scene_.interactions[index - 1];
+        if (!interaction.enabled || !interaction.on_touch || !interaction_contains(interaction, x, y)) continue;
+        widget->raw_touches_[id] = {interaction.on_touch, x, y};
+        raw(id, TouchEvent::Phase::down, x, y, true);
+        return;
+      }
+      if (widget->touch_id_.has_value()) return;
+      widget->touch_down(id, serial, x, y);
+    }
+    void up(client::Proxy&, std::uint32_t, std::uint32_t, std::int32_t id) {
+      if (widget->raw_touches_.contains(id)) {
+        raw(id, TouchEvent::Phase::up, last_x(id), last_y(id), true);
+        widget->raw_touches_.erase(id);
+        return;
+      }
+      if (widget->touch_id_ == id) widget->touch_up(false);
+    }
+    void motion(client::Proxy&, std::uint32_t, std::int32_t id, double x, double y) {
+      if (widget->raw_touches_.contains(id)) {
+        positions[id] = {x, y};
+        raw(id, TouchEvent::Phase::motion, x, y, false);
+        return;
+      }
+      if (widget->touch_id_ == id) widget->touch_motion(x, y);
+    }
+    void frame(client::Proxy&) {}
+    // The compositor took the touch (a gesture of its own): nothing clicks.
+    void cancel(client::Proxy&) {
+      const auto fingers = widget->raw_touches_;
+      for (const auto& [id, touch] : fingers) raw(id, TouchEvent::Phase::cancel, last_x(id), last_y(id), true);
+      widget->raw_touches_.clear();
+      positions.clear();
+      if (widget->touch_id_.has_value()) widget->touch_up(true);
+    }
+
+    std::map<std::int32_t, std::pair<double, double>> positions;
+    double last_x(std::int32_t id) const {
+      const auto found = positions.find(id);
+      return found != positions.end() ? found->second.first : widget->raw_touches_.at(id).start_x;
+    }
+    double last_y(std::int32_t id) const {
+      const auto found = positions.find(id);
+      return found != positions.end() ? found->second.second : widget->raw_touches_.at(id).start_y;
+    }
+    // Delivers one finger to its widget. Motion rebuilds with the next frame,
+    // like a drag; the rest rebuild at once.
+    void raw(std::int32_t id, TouchEvent::Phase phase, double x, double y, bool rebuild) {
+      const auto found = widget->raw_touches_.find(id);
+      if (found == widget->raw_touches_.end()) return;
+      if (phase == TouchEvent::Phase::down) positions[id] = {x, y};
+      const TouchHandler handler = found->second.handler;
+      invoke(handler, "touch", TouchEvent{phase, id, x, y, found->second.start_x, found->second.start_y,
+                                          widget->raw_touches_.size()});
+      if (phase == TouchEvent::Phase::up || phase == TouchEvent::Phase::cancel) positions.erase(id);
+      if (rebuild) widget->refresh_scene(true);
+      else widget->drag_refresh_pending_ = true;
+    }
+    void shape(client::Proxy&, std::int32_t, double, double) {}
+    void orientation(client::Proxy&, std::int32_t, double) {}
+  };
+  touch_->set_observer(generated::wl_touch_observer(TouchEvents{this, {}}));
+}
+
+void WaylandWidget::touch_down(std::int32_t id, std::uint32_t serial, double x, double y) {
+  touch_id_ = id;
+  touch_scrolling_ = false;
+  touch_start_x_ = touch_last_x_ = x;
+  touch_start_y_ = touch_last_y_ = y;
+  input_serial_ = serial;
+  clipboard_surface = this;
+  pointer_inside_ = true;
+  pointer_motion(x, y);
+  pointer_button(272, zwayland::generated::WL_POINTER_BUTTON_STATE_PRESSED);  // BTN_LEFT
+}
+
+void WaylandWidget::touch_motion(double x, double y) {
+  // A finger that wanders before anything grabbed it is a swipe: it scrolls,
+  // and the press it started no longer clicks.
+  constexpr double slop = 10.0;
+  if (!touch_scrolling_ && !dragging_ && text_drag_id_.empty()) {
+    const double across = std::abs(x - touch_start_x_);
+    const double down = std::abs(y - touch_start_y_);
+    if (down > slop || across > slop) {
+      touch_scrolling_ = true;
+      touch_sideways_ = across > down;
+      pressed_ = -1;
+    }
+  }
+  if (touch_scrolling_) {
+    // A finger moving up scrolls down; moving left scrolls right.
+    const double moved = touch_sideways_ ? touch_last_x_ - x : touch_last_y_ - y;
+    touch_last_x_ = x;
+    touch_last_y_ = y;
+    pointer_x_ = x;
+    pointer_y_ = y;
+    if (touch_sideways_) pointer_axis_horizontal(moved);
+    else pointer_axis(moved);
+    return;
+  }
+  touch_last_x_ = x;
+  touch_last_y_ = y;
+  pointer_motion(x, y);
+}
+
+void WaylandWidget::touch_up(bool cancelled) {
+  touch_id_.reset();
+  if (cancelled) {
+    if (dragging_) end_drag(true);
+    pressed_ = -1;
+    text_drag_id_.clear();
+  } else if (!touch_scrolling_) {
+    pointer_button(272, zwayland::generated::WL_POINTER_BUTTON_STATE_RELEASED);
+  }
+  touch_scrolling_ = false;
+  touch_sideways_ = false;
+  // A finger leaves nothing hovered behind.
+  pointer_leave();
+}
+
+// Sideways scrolling goes only to on_scroll_x handlers: scroll areas and
+// on_scroll are vertical.
+void WaylandWidget::pointer_axis_horizontal(double horizontal) {
+  if (!pointer_inside_ || horizontal == 0.0 || !std::isfinite(horizontal)) return;
+  for (std::size_t index = scene_.interactions.size(); index > 0; --index) {
+    const Interaction& interaction = scene_.interactions[index - 1];
+    if (!interaction.enabled || !interaction.on_scroll_x ||
+        !interaction_contains(interaction, pointer_x_, pointer_y_)) continue;
+    const ScrollHandler handler = interaction.on_scroll_x;
+    invoke(handler, "scroll", ScrollEvent{pointer_x_, pointer_y_, horizontal});
+    refresh_scene();
+    return;
+  }
+}
+
+void WaylandWidget::create_text_input() {
+  if (text_input_ != nullptr || seat_ == nullptr) return;
+  namespace generated = zwayland::generated;
+  const std::uint32_t id = generated::zwp_text_input_manager_v3_get_text_input(*display_, text_input_manager_->id, seat_);
+  text_input_ = display_->find_proxy(id);
+  if (text_input_ == nullptr) return;
+  struct TextInputEvents {
+    WaylandWidget* widget;
+    void enter(client::Proxy&, client::Proxy* surface) {
+      widget->text_input_entered_ = surface != nullptr;
+      widget->text_input_enabled_ = false;
+      widget->text_input_sent_.clear();
+      widget->sync_text_input();
+    }
+    void leave(client::Proxy&, client::Proxy*) {
+      // Leaving disables it on the compositor's side too.
+      widget->text_input_entered_ = false;
+      widget->text_input_enabled_ = false;
+      widget->text_input_sent_.clear();
+    }
+    void preedit_string(client::Proxy&, const std::optional<std::string>& text, std::int32_t begin, std::int32_t) {
+      widget->text_input_pending_.preedit = text;
+      widget->text_input_pending_.preedit_cursor = begin;
+    }
+    void commit_string(client::Proxy&, const std::optional<std::string>& text) {
+      widget->text_input_pending_.commit = text;
+    }
+    void delete_surrounding_text(client::Proxy&, std::uint32_t before, std::uint32_t after) {
+      widget->text_input_pending_.before = before;
+      widget->text_input_pending_.after = after;
+    }
+    void done(client::Proxy&, std::uint32_t) {
+      widget->apply_text_input();
+      widget->text_input_pending_ = {};
+    }
+    // The keyboard's own Enter (text-input v2).
+    void action(client::Proxy&, std::uint32_t action, std::uint32_t) {
+      if (action == zwayland::generated::ZWP_TEXT_INPUT_V3_ACTION_SUBMIT) widget->submit_focused_field();
+    }
+    void language(client::Proxy&, const std::string&) {}
+    void preedit_hint(client::Proxy&, std::uint32_t, std::uint32_t, std::uint32_t) {}
+  };
+  text_input_->set_observer(generated::zwp_text_input_v3_observer(TextInputEvents{this}));
+}
+
+// text-input-v3's order at done: drop the old preedit, delete around the
+// caret, insert the committed text, then place the new preedit. The preedit
+// lives in the value, so the field draws, scrolls and places the caret as
+// for any other text.
+void WaylandWidget::apply_text_input() {
+  const auto field = std::ranges::find_if(scene_.text_fields,
+      [](const TextField& candidate) { return candidate.state->focused; });
+  if (field == scene_.text_fields.end()) return;
+  TextFieldState& state = *field->state;
+  std::string& value = state.value;
+  const TextInputPending& pending = text_input_pending_;
+  bool changed = false;
+  if (state.preedit_length > 0) {
+    const std::size_t start = std::min(state.preedit_start, value.size());
+    value.erase(start, std::min(state.preedit_length, value.size() - start));
+    state.caret = start;
+    state.preedit_length = 0;
+    state.anchor.reset();
+    changed = true;
+  }
+  if (pending.before > 0 || pending.after > 0) {
+    const std::size_t start = state.caret >= pending.before ? state.caret - pending.before : 0;
+    const std::size_t end = std::min(value.size(), state.caret + pending.after);
+    if (field->authenticate) explicit_bzero(value.data() + start, end - start);
+    value.erase(start, end - start);
+    state.caret = start;
+    state.anchor.reset();
+    changed = true;
+  }
+  const auto insert = [&](std::string_view text) {
+    if (state.has_selection()) {
+      const std::size_t start = state.selection_start();
+      value.erase(start, state.selection_end() - start);
+      state.caret = start;
+      state.anchor.reset();
+    }
+    std::size_t room = field->max_length > value.size() ? field->max_length - value.size() : 0;
+    if (text.size() > room) {
+      while (room > 0 && (static_cast<unsigned char>(text[room]) & 0xC0U) == 0x80U) --room;
+      text = text.substr(0, room);
+    }
+    value.insert(state.caret, text);
+    state.caret += text.size();
+    return text.size();
+  };
+  if (pending.commit && !pending.commit->empty()) {
+    // One line, as typing and pasting give.
+    std::string line;
+    for (const char character : *pending.commit)
+      if (character == '\n' || character == '\r' || character == '\t') line += ' ';
+      else if (static_cast<unsigned char>(character) >= 0x20U && character != 0x7f) line += character;
+    insert(line);
+    changed = true;
+  }
+  if (pending.preedit && !pending.preedit->empty() && !field->password) {
+    const std::size_t start = state.caret;
+    const std::size_t length = insert(*pending.preedit);
+    state.preedit_start = start;
+    state.preedit_length = length;
+    if (pending.preedit_cursor >= 0)
+      state.caret = start + std::min<std::size_t>(static_cast<std::size_t>(pending.preedit_cursor), length);
+    changed = true;
+  }
+  if (!changed) return;
+  text_input_changed_ = true;
+  if (!field->authenticate) invoke(field->on_change, "change", state.value);
+  refresh_scene(true);
+}
+
+void WaylandWidget::submit_focused_field() {
+  const auto field = std::ranges::find_if(scene_.text_fields,
+      [](const TextField& candidate) { return candidate.state->focused; });
+  if (field == scene_.text_fields.end()) return;
+  std::string& value = field->state->value;
+  field->state->preedit_length = 0;
+  if (field->authenticate) {
+    const bool authenticated = session_authenticate(value);
+    if (!value.empty()) explicit_bzero(value.data(), value.size());
+    value.clear();
+    field->state->caret = 0;
+    field->state->anchor.reset();
+    invoke(field->on_authenticated, "authentication", authenticated);
+  } else {
+    invoke(field->on_submit, "submit", value);
+  }
+  refresh_scene(true);
+}
+
+// Enabled while a text field here has focus; the input method sees the
+// field's text around the caret (never a password's), what kind of text it
+// is, and where the caret is drawn, so it can sit clear of it.
+void WaylandWidget::sync_text_input() {
+  namespace generated = zwayland::generated;
+  if (text_input_ == nullptr || !text_input_entered_) return;
+  const auto field = std::ranges::find_if(scene_.text_fields,
+      [](const TextField& candidate) { return candidate.state->focused; });
+  if (field == scene_.text_fields.end()) {
+    if (text_input_enabled_) {
+      generated::zwp_text_input_v3_disable(*display_, text_input_->id);
+      generated::zwp_text_input_v3_commit(*display_, text_input_->id);
+      display_->flush();
+      text_input_enabled_ = false;
+      text_input_sent_.clear();
+    }
+    return;
+  }
+  const TextFieldState& state = *field->state;
+  const bool hidden = field->password || field->authenticate;
+  // Surrounding text is capped by the protocol; long values send none.
+  constexpr std::size_t most = 4000;
+  const std::string surrounding = hidden || state.value.size() > most ? std::string() : state.value;
+  const auto cursor = static_cast<std::int32_t>(surrounding.empty() ? 0 : state.caret);
+  const auto anchor = static_cast<std::int32_t>(surrounding.empty() ? 0 : state.anchor.value_or(state.caret));
+  float caret_x = 0;
+  for (const auto& [offset, x] : field->layout.stops)
+    if (offset == state.caret) caret_x = x;
+  const Interaction& box = scene_.interactions[field->interaction];
+  const auto x = static_cast<std::int32_t>(box.x + field->layout.padding + caret_x - state.scroll);
+  const auto y = static_cast<std::int32_t>(box.y);
+  const auto height = static_cast<std::int32_t>(box.height);
+  const std::string sent = std::format("{}|{}|{}|{}|{}|{}|{}", surrounding, cursor, anchor, hidden, x, y, height);
+  if (text_input_enabled_ && sent == text_input_sent_) return;
+  if (!text_input_enabled_) {
+    generated::zwp_text_input_v3_enable(*display_, text_input_->id);
+    text_input_enabled_ = true;
+  }
+  generated::zwp_text_input_v3_set_surrounding_text(*display_, text_input_->id, surrounding, cursor, anchor);
+  generated::zwp_text_input_v3_set_text_change_cause(*display_, text_input_->id,
+      text_input_changed_ ? generated::ZWP_TEXT_INPUT_V3_CHANGE_CAUSE_INPUT_METHOD
+                          : generated::ZWP_TEXT_INPUT_V3_CHANGE_CAUSE_OTHER);
+  generated::zwp_text_input_v3_set_content_type(*display_, text_input_->id,
+      hidden ? generated::ZWP_TEXT_INPUT_V3_CONTENT_HINT_HIDDEN_TEXT | generated::ZWP_TEXT_INPUT_V3_CONTENT_HINT_SENSITIVE_DATA
+             : generated::ZWP_TEXT_INPUT_V3_CONTENT_HINT_NONE,
+      hidden ? generated::ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_PASSWORD : generated::ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NORMAL);
+  generated::zwp_text_input_v3_set_cursor_rectangle(*display_, text_input_->id, x, y, 1, height);
+  generated::zwp_text_input_v3_commit(*display_, text_input_->id);
+  display_->flush();
+  text_input_changed_ = false;
+  text_input_sent_ = sent;
 }
 
 void WaylandWidget::pointer_leave() {
@@ -856,6 +1225,11 @@ std::size_t WaylandWidget::caret_at(const TextField& field, const Interaction& i
 }
 
 void WaylandWidget::text_pointer_press(std::size_t interaction_index) {
+  // Pressing a field brings back an on-screen keyboard that was put away.
+  if (text_input_ != nullptr && text_input_enabled_ && text_input_->version >= 2) {
+    zwayland::generated::zwp_text_input_v3_show_input_panel(*display_, text_input_->id);
+    display_->flush();
+  }
   const Interaction& interaction = scene_.interactions[interaction_index];
   const TextField& field = scene_.text_fields[static_cast<std::size_t>(interaction.text_field)];
   for (TextField& other : scene_.text_fields) {
@@ -1273,7 +1647,10 @@ void WaylandWidget::add_frame_callback(std::uint32_t surface) {
 void WaylandWidget::reload(const Scene& scene, const Frame& frame) {
   if (roles::kind(scene) != roles::kind(scene_))
     throw std::runtime_error("cannot change Wayland surface role on reload");
-  if (role_->reload(scene, frame)) return;
+  if (role_->reload(scene, frame)) {
+    sync_text_input();
+    return;
+  }
   const bool buffer_size_changed = frame.width != width_ || frame.height != height_;
   const Frame* next_frame = &frame;
   std::optional<Frame> retained_hover_frame;
@@ -1311,6 +1688,7 @@ void WaylandWidget::reload(const Scene& scene, const Frame& frame) {
   width_ = next_frame->width;
   height_ = next_frame->height;
   create_buffer(*next_frame);
+  sync_text_input();
   // Service events and animation ticks can arrive before the initial role
   // configure. Keep the newest wl_buffer ready, but never attach it before ack.
   if (!configured_) return;

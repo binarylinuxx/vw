@@ -100,8 +100,16 @@ struct Input {
   DragHandler on_drag_start;
   DragHandler on_drag;
   DragHandler on_drag_end;
-  // Mouse wheel or touchpad scroll over the widget.
+  // Mouse wheel or touchpad scroll over the widget, and a vertical finger
+  // swipe on a touchscreen.
   ScrollHandler on_scroll;
+  // The same sideways: tilting wheels, touchpads and horizontal swipes;
+  // delta is positive to the right.
+  ScrollHandler on_scroll_x;
+  // Raw touch: every finger that goes down on the widget, for pinches and
+  // gestures of your own. A widget with on_touch takes its fingers whole: they
+  // do not also click, drag or scroll it.
+  TouchHandler on_touch;
   // The pointer entered or left the widget's rectangle, whatever is drawn on
   // top of it (like QML's HoverHandler). The scene rebuilds afterwards, so
   // handlers can open and close hover popouts by changing state.

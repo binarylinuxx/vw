@@ -797,7 +797,8 @@ class Generator {
       if (value.kind != Expr::Kind::object) throw Error(value.at, "input is an object: { on_click: …, hover: { … } }");
       for (const auto& [field_name, field] : value.fields) {
         if (field_name == "on_click" || field_name == "on_hover" || field_name == "on_scroll" ||
-            field_name == "on_drag" || field_name == "on_drag_start" || field_name == "on_drag_end") {
+            field_name == "on_scroll_x" || field_name == "on_touch" || field_name == "on_drag" ||
+            field_name == "on_drag_start" || field_name == "on_drag_end") {
           line(field->at, std::format("{}.{} = {};", target, field_name, handler(*field)));
         } else if (field_name == "hover") {
           if (field->kind != Expr::Kind::object) throw Error(field->at, "hover is an object: { color: …, scale: … }");

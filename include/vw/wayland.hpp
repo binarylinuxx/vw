@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -68,6 +69,18 @@ class WaylandWidget {
 
   void pointer_motion(double x, double y);
   void pointer_leave();
+  void create_touch();
+  void create_text_input();
+  // Tells the input method about the focused text field (or that there is
+  // none) when anything it shows changed.
+  void sync_text_input();
+  // Applies what the input method sent, at its done event.
+  void apply_text_input();
+  void submit_focused_field();
+  void pointer_axis_horizontal(double horizontal);
+  void touch_down(std::int32_t id, std::uint32_t serial, double x, double y);
+  void touch_motion(double x, double y);
+  void touch_up(bool cancelled);
   void pointer_button(std::uint32_t button, std::uint32_t state);
   void pointer_axis(double vertical);
 
@@ -126,6 +139,37 @@ class WaylandWidget {
   zwayland::client::Proxy* seat_ = nullptr;
   zwayland::client::Proxy* pointer_ = nullptr;
   zwayland::client::Proxy* keyboard_ = nullptr;
+  // wl_touch: the finger being followed, and whether it turned into a scroll.
+  zwayland::client::Proxy* touch_ = nullptr;
+  std::optional<std::int32_t> touch_id_;
+  bool touch_scrolling_ = false;
+  bool touch_sideways_ = false;
+  // Fingers held by on_touch widgets: each keeps the handler it went down on.
+  struct RawTouch {
+    TouchHandler handler;
+    double start_x = 0.0;
+    double start_y = 0.0;
+  };
+  std::map<std::int32_t, RawTouch> raw_touches_;
+  // text-input-v3: what the input method sent since its last done, and what
+  // we last told it.
+  zwayland::client::Proxy* text_input_manager_ = nullptr;
+  zwayland::client::Proxy* text_input_ = nullptr;
+  bool text_input_entered_ = false;
+  bool text_input_enabled_ = false;
+  bool text_input_changed_ = false;  // the last edit came from the input method
+  std::string text_input_sent_;
+  struct TextInputPending {
+    std::optional<std::string> preedit;
+    std::int32_t preedit_cursor = -1;
+    std::optional<std::string> commit;
+    std::uint32_t before = 0;
+    std::uint32_t after = 0;
+  } text_input_pending_;
+  double touch_start_x_ = 0.0;
+  double touch_start_y_ = 0.0;
+  double touch_last_x_ = 0.0;
+  double touch_last_y_ = 0.0;
   struct KeyboardState;
   std::unique_ptr<KeyboardState> keyboard_state_;
   Scene scene_;

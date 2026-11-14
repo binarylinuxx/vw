@@ -3,7 +3,7 @@ title: Элементы
 description: Все элементы vw.ui и vw.layout и их свойства.
 ---
 
-Цвета принимают `"#rrggbb"`, `"#rrggbbaa"`, `"transparent"` или `vw::Color` из C++; размеры — числа или [`"N%"`](/ru/facet/layout/#относительные-размеры). `input` — это `{ on_click, on_hover, on_scroll, on_drag_start, on_drag, on_drag_end, hover: { color, scale } }`.
+Цвета принимают `"#rrggbb"`, `"#rrggbbaa"`, `"transparent"` или `vw::Color` из C++; размеры — числа или [`"N%"`](/ru/facet/layout/#относительные-размеры). `input` — это `{ on_click, on_hover, on_scroll, on_scroll_x, on_touch, on_drag_start, on_drag, on_drag_end, hover: { color, scale } }`.
 
 ## vw.ui
 

@@ -51,6 +51,21 @@ struct ScrollEvent {
   double delta = 0.0;
 };
 
+// One finger on a widget with on_touch. Each finger has its own id and is
+// delivered to the widget it went down on until it lifts.
+struct TouchEvent {
+  enum class Phase : std::uint8_t { down, motion, up, cancel };
+  Phase phase = Phase::down;
+  std::int32_t id = 0;
+  double x = 0.0;
+  double y = 0.0;
+  double start_x = 0.0;
+  double start_y = 0.0;
+  // Fingers on this surface's on_touch widgets right now, this one included
+  // (an up still counts the finger lifting).
+  std::size_t fingers = 0;
+};
+
 struct KeyEvent {
   std::uint32_t keysym = 0;
   // xkb keysym name: "Escape", "Return", "Down", "a", "F5", ...
@@ -77,6 +92,7 @@ enum class ImageFit : std::uint8_t { stretch, contain, cover };
 
 using ClickHandler = std::function<void(const ClickEvent&)>;
 using ScrollHandler = std::function<void(const ScrollEvent&)>;
+using TouchHandler = std::function<void(const TouchEvent&)>;
 // The pointer entered (true) or left (false) a widget.
 using HoverHandler = std::function<void(bool inside)>;
 // Return true when the key was handled; other keys go to the focused text field.
@@ -187,6 +203,8 @@ struct Interaction {
   DragHandler on_drag;
   DragHandler on_drag_end;
   ScrollHandler on_scroll;
+  ScrollHandler on_scroll_x;
+  TouchHandler on_touch;
   HoverHandler on_hover;
   // Whether the pointer is within the rectangle, for on_hover.
   bool pointer_inside = false;
@@ -214,6 +232,10 @@ struct TextFieldState {
   std::optional<std::size_t> anchor;
   // Horizontal scroll that keeps the caret visible, in pixels.
   float scroll = 0.0F;
+  // Text an input method is still composing (text-input-v3 preedit), kept in
+  // value at [preedit_start, preedit_start + preedit_length) until committed.
+  std::size_t preedit_start = 0;
+  std::size_t preedit_length = 0;
 
   bool has_selection() const { return anchor && *anchor != caret; }
   std::size_t selection_start() const { return anchor ? std::min(*anchor, caret) : caret; }

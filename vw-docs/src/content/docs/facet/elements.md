@@ -3,7 +3,7 @@ title: Elements
 description: Every vw.ui and vw.layout element and its properties.
 ---
 
-Colors take `"#rrggbb"`, `"#rrggbbaa"`, `"transparent"` or a C++ `vw::Color`; sizes take numbers or [`"N%"`](/facet/layout/#relative-sizes). `input` is `{ on_click, on_hover, on_scroll, on_drag_start, on_drag, on_drag_end, hover: { color, scale } }`.
+Colors take `"#rrggbb"`, `"#rrggbbaa"`, `"transparent"` or a C++ `vw::Color`; sizes take numbers or [`"N%"`](/facet/layout/#relative-sizes). `input` is `{ on_click, on_hover, on_scroll, on_scroll_x, on_touch, on_drag_start, on_drag, on_drag_end, hover: { color, scale } }`.
 
 ## vw.ui
 
