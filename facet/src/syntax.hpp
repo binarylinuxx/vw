@@ -147,6 +147,7 @@ File parse(const std::string& source);
 // Elements written without a module (Surface(…)) come from `default_module`,
 // e.g. "JES.spectralium"; without one they are an error.
 std::string generate(const File& file, const std::string& source_name, const std::string& namespace_name,
-                     const std::string& default_module = {});
+                     const std::string& default_module = {},
+                     const std::vector<std::pair<std::string, std::string>>& module_headers = {});
 
 }  // namespace facet

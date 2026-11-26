@@ -189,7 +189,7 @@ install(FILES
   include/vw/animation.hpp include/vw/app.hpp include/vw/applications.hpp include/vw/capture.hpp include/vw/greetd.hpp include/vw/host.hpp include/vw/outputs.hpp
   include/vw/bluetooth.hpp include/vw/brightness.hpp include/vw/network.hpp
   include/vw/tray.hpp include/vw/upower.hpp
-  include/vw/hyprland.hpp include/vw/ipc.hpp include/vw/mpris.hpp include/vw/notifications.hpp
+  include/vw/hyprland.hpp include/vw/image.hpp include/vw/ipc.hpp include/vw/mpris.hpp include/vw/notifications.hpp
   include/vw/pipewire.hpp include/vw/process.hpp include/vw/scene.hpp include/vw/text.hpp include/vw/ui.hpp
   include/vw/vw.hpp include/vw/zwwm.hpp include/vw/shader.glsl
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/vw")

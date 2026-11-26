@@ -11,7 +11,7 @@
 namespace {
 
 constexpr std::string_view usage =
-    "usage: facetc INPUT.facet [-o OUTPUT.hpp] [--namespace NAME] [--module PATH]\n"
+    "usage: facetc INPUT.facet [-o OUTPUT.hpp] [--namespace NAME] [--module PATH] [--module-header PATH HEADER]\n"
     "\n"
     "Writes C++ for each view in INPUT: a function template taking vw::Ui& and\n"
     "the view's parameters. Without -o the header goes to standard output.\n"
@@ -45,10 +45,25 @@ int main(int argc, char** argv) {
   std::string output;
   std::string namespace_name = "views";
   std::string default_module;
+  std::vector<std::pair<std::string, std::string>> module_headers;
   for (int index = 1; index < argc; ++index) {
     const std::string_view argument(argv[index]);
     if ((argument == "-o" || argument == "--namespace" || argument == "--module") && index + 1 < argc) {
       (argument == "-o" ? output : argument == "--module" ? default_module : namespace_name) = argv[++index];
+    } else if (argument == "--module-header" && index + 2 < argc) {
+      const std::string path = argv[++index];
+      const std::string header = argv[++index];
+      if (path.empty() || header.empty() || header.find_first_of("\r\n\"") != std::string::npos) {
+        std::cerr << "invalid module header\\n";
+        return EXIT_FAILURE;
+      }
+      for (const auto& [registered, previous] : module_headers) {
+        if (registered == path && previous != header) {
+          std::cerr << "conflicting module headers for " << path << "\\n";
+          return EXIT_FAILURE;
+        }
+      }
+      module_headers.emplace_back(path, header);
     } else if (argument == "-h" || argument == "--help") {
       std::cout << usage;
       return EXIT_SUCCESS;
@@ -66,7 +81,7 @@ int main(int argc, char** argv) {
   std::string source;
   try {
     source = read(input);
-    const std::string header = facet::generate(facet::parse(source), input, namespace_name, default_module);
+    const std::string header = facet::generate(facet::parse(source), input, namespace_name, default_module, module_headers);
     if (output.empty()) {
       std::cout << header;
     } else {

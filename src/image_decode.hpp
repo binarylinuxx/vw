@@ -7,6 +7,8 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
+#include <utility>
 #include <span>
 #include <vector>
 
@@ -27,6 +29,8 @@ struct DecodedRaster {
 // Picks the format by its contents. Throws std::runtime_error with a short
 // reason when the bytes are not an image it reads.
 DecodedRaster decode_raster(std::span<const std::uint8_t> bytes);
+
+std::optional<std::pair<double, double>> svg_intrinsic_size(std::span<const std::uint8_t> bytes);
 
 // Renders an SVG (or gzipped SVGZ) document into width x height pixels. A
 // zero size takes it from the other one and the document's aspect ratio, or

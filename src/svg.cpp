@@ -2066,6 +2066,19 @@ std::optional<std::array<double, 4>> parse_css_color(std::string_view text) {
   return std::array<double, 4>{color->r, color->g, color->b, color->a};
 }
 
+std::optional<std::pair<double, double>> svg_intrinsic_size(std::span<const std::uint8_t> bytes) {
+  std::vector<std::uint8_t> inflated;
+  if (bytes.size() >= 2 && bytes[0] == 0x1F && bytes[1] == 0x8B) {
+    inflated = gzip_decompress(bytes, 64U << 20U);
+    bytes = inflated;
+  }
+  std::string_view text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+  if (text.starts_with("\xEF\xBB\xBF")) text.remove_prefix(3);
+  const auto root = XmlParser(text).parse();
+  Renderer renderer(*root, {});
+  return renderer.intrinsic_size();
+}
+
 DecodedRaster render_svg(std::span<const std::uint8_t> bytes, int target_width, int target_height,
                          const std::filesystem::path& base) {
   std::vector<std::uint8_t> inflated;

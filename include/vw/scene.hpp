@@ -100,7 +100,8 @@ enum class Keyboard : std::uint8_t { automatic, none, on_demand, exclusive };
 // How an image fills a width x height box. stretch distorts; contain keeps
 // the aspect ratio inside the box (the widget may come out smaller); cover
 // keeps the aspect ratio and crops the overflow, centered.
-enum class ImageFit : std::uint8_t { stretch, contain, cover };
+// aspect preserves intrinsic proportions, using contain when both sides are given.
+enum class ImageFit : std::uint8_t { stretch, contain, cover, aspect };
 
 using ClickHandler = std::function<void(const ClickEvent&)>;
 using ScrollHandler = std::function<void(const ScrollEvent&)>;

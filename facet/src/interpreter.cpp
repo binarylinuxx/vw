@@ -581,7 +581,7 @@ const std::vector<std::string_view>& choices(Type type) {
       {Type::justify, {"start", "center", "end", "space-between", "space-around", "space-evenly"}},
       {Type::align, {"start", "center", "end"}},
       {Type::weight, {"thin", "light", "regular", "medium", "semibold", "bold", "black"}},
-      {Type::fit, {"stretch", "contain", "cover"}},
+      {Type::fit, {"stretch", "contain", "cover", "aspect"}},
       {Type::text_align, {"start", "center", "end"}},
       {Type::gradient, {"none", "horizontal", "vertical"}},
       {Type::color_depth, {"bits8", "bits10", "bits16"}},
@@ -1035,7 +1035,7 @@ class Builder {
         else if (name == "fit") {
           const auto& text = value.text();
           p.fit = text == "contain" ? vw::ImageFit::contain : text == "cover" ? vw::ImageFit::cover
-                                                                              : vw::ImageFit::stretch;
+                                                                              : text == "aspect" ? vw::ImageFit::aspect : vw::ImageFit::stretch;
         } else if (name == "radius") p.radius = f();
         else if (name == "padding") p.place.margin = margin_of(value);
         else if (name == "input") p.input = make_input(value);

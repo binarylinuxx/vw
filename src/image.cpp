@@ -198,10 +198,16 @@ std::vector<std::pair<std::string, Fitted>>& fitted_cache() {
 }
 
 
-// Crops and downscales `source` to width x height (either 0 keeps the
-// natural size) the way `fit` asks.
+// Crops and downscales `source` to width x height the way `fit` asks.
+// One omitted dimension preserves the aspect ratio; both keep natural size.
 Fitted fit_image(const DecodedImage& source_image, float width, float height, ImageFit fit) {
   const DecodedImage* source = &source_image;
+  if (source->width > 0 && source->height > 0) {
+    if (width > 0 && height <= 0)
+      height = std::max(1.0F, static_cast<float>(std::ceil(static_cast<double>(width) * source->height / source->width)));
+    else if (height > 0 && width <= 0)
+      width = std::max(1.0F, static_cast<float>(std::ceil(static_cast<double>(height) * source->width / source->height)));
+  }
   const bool sized = width > 0 && height > 0;
   // Every level, full size first when it is kept.
   std::vector<Level> levels;
@@ -217,7 +223,7 @@ Fitted fit_image(const DecodedImage& source_image, float width, float height, Im
     const double box = static_cast<double>(width) / height;
     const double image = static_cast<double>(source->width) / source->height;
     Crop crop{0, 0, source->width, source->height};
-    if (fit == ImageFit::contain) {
+    if (fit == ImageFit::contain || fit == ImageFit::aspect) {
       if (image > box) height = static_cast<float>(width / image);
       else width = static_cast<float>(height * image);
     } else if (fit == ImageFit::cover && std::abs(image - box) > 1e-6) {
@@ -317,6 +323,41 @@ std::vector<FittedBitmap>& fitted_bitmaps() {
 
 }  // namespace
 
+std::optional<std::pair<float, float>> image_size(const std::filesystem::path& path) {
+  if (path.empty()) return std::nullopt;
+  try {
+    if (!is_svg(path)) {
+      const auto image = decode_image(path, 0, 0);
+      if (image->width <= 0 || image->height <= 0) return std::nullopt;
+      return std::pair{static_cast<float>(image->width), static_cast<float>(image->height)};
+    }
+    using Size = std::optional<std::pair<float, float>>;
+    struct Entry { std::filesystem::file_time_type modified; Size size; };
+    static std::mutex mutex;
+    static std::unordered_map<std::string, Entry> cache;
+    const auto modified = std::filesystem::last_write_time(path);
+    const auto key = path.string();
+    std::lock_guard lock(mutex);
+    if (const auto it = cache.find(key); it != cache.end() && it->second.modified == modified)
+      return it->second.size;
+    std::ifstream file(path, std::ios::binary);
+    if (!file) return std::nullopt;
+    const std::vector<std::uint8_t> bytes{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+    const auto intrinsic = detail::svg_intrinsic_size(bytes);
+    Size size;
+    if (intrinsic && intrinsic->first > 0 && intrinsic->second > 0 &&
+        std::isfinite(intrinsic->first) && std::isfinite(intrinsic->second)) {
+      const float w = static_cast<float>(intrinsic->first), h = static_cast<float>(intrinsic->second);
+      if (std::isfinite(w) && std::isfinite(h) && w > 0 && h > 0) size = std::pair{w, h};
+    }
+    if (cache.size() >= 256) cache.clear();
+    cache.insert_or_assign(key, Entry{modified, size});
+    return size;
+  } catch (const std::exception&) {
+    return std::nullopt;
+  }
+}
+
 std::pair<float, float> add_image(Scene& scene, const Bitmap& bitmap,
                                   float width, float height, const Rectangle& style,
                                   ImageFit fit) {
@@ -348,7 +389,7 @@ std::pair<float, float> add_image(Scene& scene, const std::filesystem::path& pat
     push_fitted(scene, fitted, style);
     return std::pair{fitted.width, fitted.height};
   };
-  const bool sized = width > 0 && height > 0;
+  const bool sized = width > 0 || height > 0;
   std::string key;
   if (sized) {
     key = path.string() + '\x1f' + std::to_string(static_cast<int>(fit)) + '\x1f' +
