@@ -100,10 +100,11 @@ std::vector<fs::path> base_directories() {
   return bases;
 }
 
-// The icon theme GTK would use: $VW_ICON_THEME, then gtk-icon-theme-name in
-// GTK 4 and 3 settings.ini (user, then system), then Adwaita.
+// The icon theme: $VWICONTHEME (or $VW_ICON_THEME), then gtk-icon-theme-name
+// in GTK 4 and 3 settings.ini (user, then system), then Adwaita.
 std::string theme_name() {
-  if (std::string forced = environment("VW_ICON_THEME"); !forced.empty()) return forced;
+  for (const char* variable : {"VWICONTHEME", "VW_ICON_THEME"})
+    if (std::string forced = environment(variable); !forced.empty()) return forced;
   std::vector<fs::path> configs;
   const std::string config_home = environment("XDG_CONFIG_HOME");
   const std::string home = environment("HOME");
