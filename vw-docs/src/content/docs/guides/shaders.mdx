@@ -79,6 +79,41 @@ base.rectangle({ width = 420, height = 220, shader_passes = {
 
 Each backdrop read copies the whole surface, so it costs the same for every pass that reads it. A pass whose shader fails to load is skipped, not drawn as a plain rectangle.
 
+### Named images
+
+A pass can draw into a float image of its own instead of the surface, and later passes can read it. That keeps intermediate results such as masks, distance fields and flood fills at full precision, and the wallpaper under the rectangle stays untouched for the last pass. Give the pass an `output` name, list what it reads in `inputs`, and grow the images past the rectangle with `target_padding`:
+
+```cpp
+ui.rectangle({.width = 420, .height = 220, .radius = 32, .color = vw::rgba(0x00000000), .color2 = tint,
+              .shader_passes = {{.shader = "mask.comp", .output = "mask"},
+                                {.shader = "flood.comp", .params = {8}, .output = "field", .inputs = {"mask"}},
+                                {.shader = "flood.comp", .params = {4}, .output = "field", .inputs = {"field"}},
+                                {.shader = "lens.comp", .inputs = {"mask", "field"}}},
+              .target_padding = 64});
+```
+
+The images are RGBA, 32-bit float, the rectangle's size plus `target_padding` on every side. A rectangle has up to eight names. A pass may write the image it reads, as `field` above: it reads the previous contents throughout and its result replaces them after. An input must be written by an earlier pass. With `.color` transparent, the plain fill draws nothing, and `.color2` can carry the tint for the last pass.
+
+Such passes `#define VW_USE_TARGETS` (it implies `VW_USE_DATA`):
+
+```glsl
+#version 450
+// @vw name: Flood step
+// @vw params: jump
+#define VW_USE_TARGETS
+#include <vw/shader.glsl>
+
+void main() {
+  ivec2 pixel;
+  if (!vw_pass_begin(pixel)) return;          // one invocation per image pixel
+  vec4 here = vw_input_load(0, pixel);         // inputs[0], at an image pixel
+  vec4 there = vw_input_sample(0, vec2(pixel) + 0.5 + vec2(vw_param(0), 0.0));  // bilinear
+  vw_store(pixel, max(here, there));           // into this pass's output
+}
+```
+
+A pass that draws on the surface (no `output`) uses `vw_begin` as usual, and finds its pixel in the images with `vw_target_position(vec2(pixel) + 0.5)`. Also there: `vw_target_size()`, `vw_target_padding()`, `vw_pass_local(pixel)` (an image pixel relative to the rectangle, like `vw_begin`'s `local`), `vw_surface_position()`.
+
 ## Animate it
 
 `#define VW_USE_TIME` gives the shader `vw_time()`, seconds since the app started drawing. While such a shader is on screen, its surface draws every frame; when it is gone, vw goes back to drawing only on change.
@@ -130,6 +165,7 @@ The flags are derived from the bindings the compiled module declares and from `V
 | `vw_data(i)`, `vw_data_length()` | `shader_data`, with `VW_USE_DATA` |
 | `vw_backdrop(pixel)` | what was drawn before, with `VW_USE_BACKDROP` |
 | `vw_time()` | seconds since the app started drawing, with `VW_USE_TIME` |
+| `vw_pass_begin`, `vw_store`, `vw_input_load`, `vw_input_sample`, `vw_target_*` | a pass's named images (bindings 3 and 4), with `VW_USE_TARGETS` |
 
 <Callout type="tip" title="Only ask for the backdrop when you sample it">
 The backdrop is a copy of the whole surface made just before your rectangle draws. Without `VW_USE_BACKDROP` the shader never declares it, the `.vws` says so, and vw skips the copy — for a shell drawn with one big shader, that is a full-surface copy saved every frame.
