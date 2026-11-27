@@ -1,4 +1,5 @@
 #include "vw/app.hpp"
+#include "vw/image.hpp"
 #include "vw/animation.hpp"
 #include "vw/process.hpp"
 #include "vw/renderer.hpp"
@@ -78,7 +79,11 @@ class App::Outputs {
   std::vector<std::string> names_;
 };
 
-App::App() { on_event(poll_event_fd(), drain_poll_events); }
+App::App() {
+  on_event(poll_event_fd(), drain_poll_events);
+  // Images decoded in the background (ImageProps::async, preload_image).
+  on_event(image_event_fd(), drain_image_events);
+}
 
 App::App(BuildFunction build) : App() { surface(std::move(build)); }
 

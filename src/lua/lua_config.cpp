@@ -503,6 +503,8 @@ ImageProps image_props(lua_State* lua) {
   else if (fit == "cover") props.fit = ImageFit::cover;
   else if (fit == "aspect") props.fit = ImageFit::aspect;
   else if (fit != "stretch") throw std::invalid_argument("image fit must be stretch, contain, cover or aspect");
+  props.async = boolean_field(lua, 1, "async", false);
+  props.animated = boolean_field(lua, 1, "animated", false);
   props.radius = number_field(lua, 1, "radius", 0.0F);
   color_field(lua, 1, "tint", props.tint);
   props.effect.saturation = number_field(lua, 1, "saturation", 1.0F);

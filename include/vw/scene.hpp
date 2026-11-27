@@ -197,6 +197,8 @@ struct Raster {
   Pixels rgba;
   // Sixteen bits a channel; drawn instead of rgba when set.
   DeepPixels rgba16;
+  // The part of the pixels drawn, x, y, width, height from 0 to 1.
+  std::array<float, 4> source{0.0F, 0.0F, 1.0F, 1.0F};
   bool use_tint = true;
   bool alpha_mask = false;
   // Rounded to the nearest pixel (text); otherwise the pixel below it.
@@ -212,7 +214,7 @@ struct Raster {
   bool operator==(const Raster& other) const {
     return carrier == other.carrier && width == other.width && height == other.height &&
            use_tint == other.use_tint && alpha_mask == other.alpha_mask &&
-           pixel_snap == other.pixel_snap &&
+           pixel_snap == other.pixel_snap && source == other.source &&
            (shifted == other.shifted || (shifted && other.shifted && *shifted == *other.shifted)) && effect == other.effect && mask == other.mask &&
            (rgba == other.rgba || (rgba && other.rgba && *rgba == *other.rgba)) &&
            (rgba16 == other.rgba16 || (rgba16 && other.rgba16 && *rgba16 == *other.rgba16));

@@ -207,7 +207,9 @@ struct RasterPushConstants {
   std::array<float, 4> params;
   std::array<float, 4> effect;
   std::array<float, 4> colorize;
+  std::array<float, 4> source;
 };
+static_assert(sizeof(RasterPushConstants) <= sizeof(PushConstants), "raster constants outgrow the push range");
 
 }  // namespace
 
@@ -671,7 +673,8 @@ Frame Renderer::render(const Scene& scene) const {
           {raster.effect.saturation, raster.effect.hue_rotate * 3.14159265F / 180.0F, raster.effect.colorize_amount,
            static_cast<float>(raster.mask.size() / 2)},
           {raster.effect.colorize[0], raster.effect.colorize[1], raster.effect.colorize[2],
-           std::bit_cast<float>(mask_offsets[raster_index])}};
+           std::bit_cast<float>(mask_offsets[raster_index])},
+          raster.source};
       vkCmdPushConstants(command, state_->pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                          sizeof(push), &push);
       vkCmdDispatch(command,

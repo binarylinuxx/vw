@@ -521,7 +521,8 @@ const std::vector<ElementSpec>& elements() {
         {"pixel_snap", boolean}, {"input", input}}, "text"},
       {"vw.ui", "Image", Kind::image,
        {{"path", string}, {"icon", string}, {"width", number}, {"height", number}, {"fit", fit},
-        {"radius", number}, {"padding", padding}, {"input", input}}, "path"},
+        {"radius", number}, {"padding", padding}, {"input", input}, {"async", boolean}, {"animated", boolean}},
+       "path"},
       {"vw.ui", "TextField", Kind::text_field,
        {{"id", string}, {"value", string}, {"placeholder", string}, {"width", number}, {"height", number},
         {"radius", number}, {"color", color}, {"border_color", color}, {"focus_color", color},
@@ -1039,6 +1040,8 @@ class Builder {
         } else if (name == "radius") p.radius = f();
         else if (name == "padding") p.place.margin = margin_of(value);
         else if (name == "input") p.input = make_input(value);
+        else if (name == "async") p.async = value.boolean();
+        else if (name == "animated") p.animated = value.boolean();
         return;
       }
       case Kind::text_field: {

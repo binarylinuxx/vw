@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <limits>
 #include <optional>
 #include <string_view>
@@ -29,6 +30,11 @@ double animate(std::string_view id, double target, const AnimationOptions& optio
 std::optional<Easing> parse_easing(std::string_view name);
 
 void begin_animation_frame();
+// The time the next built frame will be on screen. vw's frame pacing sets it
+// before an animation frame's build, so tweens are sampled at evenly spaced
+// presentation times rather than whenever the build happened to run; the
+// next begin_animation_frame() uses it once.
+void set_next_frame_time(std::chrono::steady_clock::time_point time);
 bool animations_active();
 // Keeps rendering frames for one more refresh.
 void request_animation_continuation();

@@ -1,16 +1,24 @@
 #include "vw/image.hpp"
 #include "image_decode.hpp"
+#include "image_decode_internal.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <condition_variable>
 #include <cstring>
+#include <deque>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <stdexcept>
+#include <thread>
 #include <unordered_map>
 #include <vector>
+#include <sys/eventfd.h>
+#include <unistd.h>
 
 namespace vw {
 namespace {
@@ -89,30 +97,61 @@ bool is_svg(const std::filesystem::path& path) {
   return extension == ".svg" || extension == ".svgz";
 }
 
+std::string decode_key(const std::filesystem::path& path, int target_width, int target_height) {
+  return path.string() + (is_svg(path) ? ":" + std::to_string(target_width) + "x" + std::to_string(target_height) : "");
+}
+
+int target_dimension(float requested) { return requested > 0 ? static_cast<int>(std::ceil(requested)) : 0; }
+
+// Decoded images by file (and size, for SVG). The lock covers lookups only:
+// decoding runs outside it, so a worker decode never stalls a build.
+struct DecodeCache {
+  std::mutex mutex;
+  std::unordered_map<std::string, std::shared_ptr<const DecodedImage>> entries;
+  // Files that failed, by key and modification time, so async loads do not
+  // retry them on every rebuild.
+  std::unordered_map<std::string, std::filesystem::file_time_type> failed;
+};
+
+DecodeCache& decode_cache() {
+  static DecodeCache cache;
+  return cache;
+}
+
+std::shared_ptr<const DecodedImage> cached_image(const std::string& key, std::filesystem::file_time_type modified) {
+  DecodeCache& cache = decode_cache();
+  std::lock_guard lock(cache.mutex);
+  const auto found = cache.entries.find(key);
+  if (found != cache.entries.end() && found->second->modified == modified) return found->second;
+  return nullptr;
+}
+
 std::shared_ptr<const DecodedImage> decode_image(const std::filesystem::path& path,
                                                   float requested_width, float requested_height) {
-  static std::mutex mutex;
-  static std::unordered_map<std::string, std::shared_ptr<const DecodedImage>> cache;
   const bool svg = is_svg(path);
-  const int target_width = requested_width > 0 ? static_cast<int>(std::ceil(requested_width)) : 0;
-  const int target_height = requested_height > 0 ? static_cast<int>(std::ceil(requested_height)) : 0;
-  const std::string key = path.string() + (svg ? ":" + std::to_string(target_width) +
-                                                    "x" + std::to_string(target_height) : "");
+  const int target_width = target_dimension(requested_width);
+  const int target_height = target_dimension(requested_height);
+  const std::string key = decode_key(path, target_width, target_height);
   const auto modified = std::filesystem::last_write_time(path);
-  std::lock_guard lock(mutex);
-  if (const auto found = cache.find(key);
-      found != cache.end() && found->second->modified == modified) return found->second;
+  if (auto found = cached_image(key, modified)) return found;
 
-  std::ifstream file(path, std::ios::binary);
-  if (!file) throw std::runtime_error("could not open image " + path.string());
-  const std::vector<std::uint8_t> bytes{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+  DecodeCache& cache = decode_cache();
   detail::DecodedRaster raster;
   try {
-    raster = svg ? detail::render_svg(bytes, target_width, target_height, path.parent_path())
-                 : detail::decode_raster(bytes);
-  } catch (const std::exception& error) {
-    throw std::runtime_error(std::string(svg ? "could not render SVG " : "could not decode image ") + key + ": " +
-                             error.what());
+    std::ifstream file(path, std::ios::binary);
+    if (!file) throw std::runtime_error("could not open image " + path.string());
+    const std::vector<std::uint8_t> bytes{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+    try {
+      raster = svg ? detail::render_svg(bytes, target_width, target_height, path.parent_path())
+                   : detail::decode_raster(bytes);
+    } catch (const std::exception& error) {
+      throw std::runtime_error(std::string(svg ? "could not render SVG " : "could not decode image ") + key + ": " +
+                               error.what());
+    }
+  } catch (...) {
+    std::lock_guard lock(cache.mutex);
+    cache.failed[key] = modified;
+    throw;
   }
   auto decoded = std::make_shared<DecodedImage>();
   decoded->modified = modified;
@@ -125,15 +164,99 @@ std::shared_ptr<const DecodedImage> decode_image(const std::filesystem::path& pa
   // would cost memory, while re-decoding on every new size made animated
   // wallpaper cards stutter.
   constexpr std::size_t retained_pixels = 16U * 1024U * 1024U;
-  if (static_cast<std::size_t>(raster.width) * static_cast<std::size_t>(raster.height) <= retained_pixels) {
-    cache[key] = decoded;
-  } else {
+  std::shared_ptr<const DecodedImage> stored = decoded;
+  if (static_cast<std::size_t>(raster.width) * static_cast<std::size_t>(raster.height) > retained_pixels) {
     auto proxy = std::make_shared<DecodedImage>(*decoded);
     proxy->rgba = {};
     proxy->rgba16 = {};
-    cache[key] = proxy;
+    stored = proxy;
   }
+  std::lock_guard lock(cache.mutex);
+  cache.entries[key] = stored;
+  cache.failed.erase(key);
   return decoded;
+}
+
+bool failed_before(const std::string& key, std::filesystem::file_time_type modified) {
+  DecodeCache& cache = decode_cache();
+  std::lock_guard lock(cache.mutex);
+  const auto found = cache.failed.find(key);
+  return found != cache.failed.end() && found->second == modified;
+}
+
+// Decodes queued files on one worker thread; each finished file makes the
+// event fd readable.
+class Loader {
+ public:
+  Loader() : event_(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK)) {}
+  ~Loader() {
+    {
+      std::lock_guard lock(mutex_);
+      stopping_ = true;
+    }
+    wake_.notify_all();
+    if (thread_.joinable()) thread_.join();
+    if (event_ >= 0) close(event_);
+  }
+
+  void enqueue(std::filesystem::path path, int width, int height) {
+    const std::string key = decode_key(path, width, height);
+    {
+      std::lock_guard lock(mutex_);
+      if (!queued_.insert(key).second) return;
+      jobs_.push_back({std::move(path), width, height, key});
+      if (!thread_.joinable()) thread_ = std::thread([this] { run(); });
+    }
+    wake_.notify_one();
+  }
+  int fd() const { return event_; }
+  bool drain() const {
+    std::uint64_t count = 0;
+    bool any = false;
+    while (event_ >= 0 && read(event_, &count, sizeof(count)) > 0) any = true;
+    return any;
+  }
+
+ private:
+  struct Job {
+    std::filesystem::path path;
+    int width = 0, height = 0;
+    std::string key;
+  };
+
+  void run() {
+    std::unique_lock lock(mutex_);
+    for (;;) {
+      wake_.wait(lock, [this] { return stopping_ || !jobs_.empty(); });
+      if (stopping_) return;
+      Job job = std::move(jobs_.front());
+      jobs_.pop_front();
+      lock.unlock();
+      try {
+        (void)decode_image(job.path, static_cast<float>(job.width), static_cast<float>(job.height));
+      } catch (const std::exception&) {
+        // Recorded as failed; drawing the file reports the error.
+      }
+      lock.lock();
+      queued_.erase(job.key);
+      const std::uint64_t one = 1;
+      const auto written = write(event_, &one, sizeof(one));
+      (void)written;
+    }
+  }
+
+  const int event_;
+  std::mutex mutex_;
+  std::condition_variable wake_;
+  std::deque<Job> jobs_;
+  std::set<std::string> queued_;
+  bool stopping_ = false;
+  std::thread thread_;
+};
+
+Loader& loader() {
+  static Loader instance;
+  return instance;
 }
 
 }  // namespace
@@ -185,6 +308,8 @@ std::vector<Pixel> resample(const std::vector<Pixel>& source, int source_width, 
 struct Fitted {
   Pixels pixels;
   DeepPixels deep;
+  // The part of the pixels shown, 0..1.
+  std::array<float, 4> source{0.0F, 0.0F, 1.0F, 1.0F};
   std::uint32_t pixel_width = 0;
   std::uint32_t pixel_height = 0;
   float width = 0;
@@ -281,7 +406,8 @@ Fitted fit_image(const DecodedImage& source_image, float width, float height, Im
   if (output_width == 0 || output_height == 0 || output_width > 8192 || output_height > 8192) {
     throw std::runtime_error("image dimensions must be between 1 and 8192 pixels");
   }
-  const Fitted fitted{deep ? Pixels{} : std::move(pixels), std::move(deep), source_width, source_height,
+  const Fitted fitted{deep ? Pixels{} : std::move(pixels), std::move(deep), {0.0F, 0.0F, 1.0F, 1.0F},
+                      source_width, source_height,
                       static_cast<float>(output_width), static_cast<float>(output_height)};
   return fitted;
 }
@@ -302,7 +428,51 @@ void push_fitted(Scene& scene, const Fitted& fitted, const Rectangle& style) {
   raster.height = fitted.pixel_height;
   raster.rgba = fitted.pixels;
   raster.rgba16 = fitted.deep;
+  raster.source = fitted.source;
   scene.rasters.push_back(std::move(raster));
+}
+
+// For sizes that change every frame: no resampling, just the smallest
+// cached level that covers the size, and the crop as a source rectangle the
+// GPU applies.
+Fitted animated_fit(const DecodedImage& image, float width, float height, ImageFit fit) {
+  std::vector<Level> levels;
+  if (image.rgba || image.rgba16) levels.push_back({image.width, image.height, image.rgba, image.rgba16});
+  levels.insert(levels.end(), image.mips.begin(), image.mips.end());
+  if (levels.empty()) throw std::runtime_error("image has no pixels");
+  if (width <= 0 && height <= 0) {
+    width = static_cast<float>(image.width);
+    height = static_cast<float>(image.height);
+  } else if (width <= 0) {
+    width = height * static_cast<float>(image.width) / static_cast<float>(image.height);
+  } else if (height <= 0) {
+    height = width * static_cast<float>(image.height) / static_cast<float>(image.width);
+  }
+  const double box = static_cast<double>(width) / height;
+  const double aspect = static_cast<double>(image.width) / image.height;
+  std::array<float, 4> source{0.0F, 0.0F, 1.0F, 1.0F};
+  if (fit == ImageFit::contain || fit == ImageFit::aspect) {
+    if (aspect > box) height = static_cast<float>(width / aspect);
+    else width = static_cast<float>(height * aspect);
+  } else if (fit == ImageFit::cover && std::abs(aspect - box) > 1e-6) {
+    if (aspect > box) {
+      source[2] = static_cast<float>(box / aspect);
+      source[0] = (1.0F - source[2]) / 2.0F;
+    } else {
+      source[3] = static_cast<float>(aspect / box);
+      source[1] = (1.0F - source[3]) / 2.0F;
+    }
+  }
+  if (width < 1 || height < 1 || width > 8192 || height > 8192)
+    throw std::runtime_error("image dimensions must be between 1 and 8192 pixels");
+  const Level* chosen = &levels.front();
+  for (const Level& level : levels) {
+    if (static_cast<float>(level.width) * source[2] < width || static_cast<float>(level.height) * source[3] < height)
+      break;
+    chosen = &level;
+  }
+  return {chosen->rgba16 ? Pixels{} : chosen->rgba, chosen->rgba16, source,
+          static_cast<std::uint32_t>(chosen->width), static_cast<std::uint32_t>(chosen->height), width, height};
 }
 
 // Fitted bitmaps by their pixels, fit and size: a capture redrawn on every
@@ -385,10 +555,30 @@ std::pair<float, float> add_image(Scene& scene, const Bitmap& bitmap,
 std::pair<float, float> add_image(Scene& scene, const std::filesystem::path& path,
                                   float width, float height, const Rectangle& style,
                                   ImageFit fit) {
+  std::pair<float, float> size;
+  add_image(scene, path, width, height, style, fit, {}, &size);
+  return size;
+}
+
+bool add_image(Scene& scene, const std::filesystem::path& path, float width, float height,
+               const Rectangle& style, ImageFit fit, const ImageLoad& load, std::pair<float, float>* size) {
   const auto push = [&](const Fitted& fitted) {
     push_fitted(scene, fitted, style);
-    return std::pair{fitted.width, fitted.height};
+    if (size != nullptr) *size = {fitted.width, fitted.height};
+    return true;
   };
+  if (load.async) {
+    const auto modified = std::filesystem::last_write_time(path);
+    const int target_width = target_dimension(width), target_height = target_dimension(height);
+    const std::string key = decode_key(path, target_width, target_height);
+    if (!cached_image(key, modified) && !failed_before(key, modified)) {
+      loader().enqueue(path, target_width, target_height);
+      if (size != nullptr) *size = {std::max(0.0F, width), std::max(0.0F, height)};
+      return false;
+    }
+  }
+  if (load.animated) return push(animated_fit(*decode_image(path, width, height), width, height, fit));
+
   const bool sized = width > 0 || height > 0;
   std::string key;
   if (sized) {
@@ -409,5 +599,67 @@ std::pair<float, float> add_image(Scene& scene, const std::filesystem::path& pat
   }
   return push(fitted);
 }
+
+std::optional<Bitmap> load_image(const std::filesystem::path& path, std::uint32_t max_width,
+                                 std::uint32_t max_height, std::string* reason) {
+  try {
+    std::shared_ptr<const DecodedImage> decoded;
+    if (is_svg(path)) {
+      decoded = decode_image(path, static_cast<float>(max_width), static_cast<float>(max_height));
+    } else {
+      decoded = decode_image(path, 0, 0);
+    }
+    float width = static_cast<float>(decoded->width), height = static_cast<float>(decoded->height);
+    const float scale = std::min({1.0F, max_width > 0 ? static_cast<float>(max_width) / width : 1.0F,
+                                  max_height > 0 ? static_cast<float>(max_height) / height : 1.0F});
+    width = std::max(1.0F, std::round(width * scale));
+    height = std::max(1.0F, std::round(height * scale));
+    const Fitted fitted = fit_image(*decoded, width, height, ImageFit::stretch);
+    return Bitmap{fitted.pixel_width, fitted.pixel_height, fitted.pixels, fitted.deep};
+  } catch (const std::exception& error) {
+    if (reason != nullptr) *reason = error.what();
+    return std::nullopt;
+  }
+}
+
+bool save_png(const Bitmap& bitmap, const std::filesystem::path& path) {
+  const std::size_t count = static_cast<std::size_t>(bitmap.width) * bitmap.height;
+  if (bitmap.empty() || (bitmap.rgba16 ? bitmap.rgba16->size() : bitmap.rgba->size()) != count) return false;
+  const std::vector<std::uint8_t> png = bitmap.rgba16
+      ? detail::encode_png(bitmap.width, bitmap.height, nullptr, bitmap.rgba16->data())
+      : detail::encode_png(bitmap.width, bitmap.height, bitmap.rgba->data(), nullptr);
+  std::error_code error;
+  if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path(), error);
+  const std::filesystem::path temporary = path.string() + ".tmp" + std::to_string(getpid());
+  {
+    std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+    output.write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
+    if (!output.flush()) {
+      std::filesystem::remove(temporary, error);
+      return false;
+    }
+  }
+  std::filesystem::rename(temporary, path, error);
+  if (error) std::filesystem::remove(temporary, error);
+  return !error;
+}
+
+void preload_image(const std::filesystem::path& path) {
+  std::error_code error;
+  const auto modified = std::filesystem::last_write_time(path, error);
+  if (error) return;
+  const std::string key = decode_key(path, 0, 0);
+  if (cached_image(key, modified) || failed_before(key, modified)) return;
+  loader().enqueue(path, 0, 0);
+}
+
+bool image_ready(const std::filesystem::path& path) {
+  std::error_code error;
+  const auto modified = std::filesystem::last_write_time(path, error);
+  return !error && cached_image(decode_key(path, 0, 0), modified) != nullptr;
+}
+
+int image_event_fd() { return loader().fd(); }
+bool drain_image_events() { return loader().drain(); }
 
 }  // namespace vw

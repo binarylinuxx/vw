@@ -12,6 +12,7 @@ layout(push_constant) uniform Raster {
   vec4 params;
   vec4 effect;    // saturation, hue rotation in radians, colorize amount, mask points
   vec4 colorize;  // colour, and where the mask starts in the pixel buffer
+  vec4 source;    // the part of the pixels drawn: x, y, width, height in 0..1
 } raster;
 
 // Buffer offsets arrive as the bits of a uint, not as a float value.
@@ -74,8 +75,11 @@ vec4 unpack_deep(uint index) {
 
 vec4 sample_pixel(vec2 coordinate) {
   ivec2 size = ivec2(raster.source_info.yz);
-  vec2 position = clamp(coordinate * vec2(size) - vec2(0.5),
-                        vec2(0.0), vec2(size - 1));
+  vec2 low_edge = raster.source.xy * vec2(size);
+  vec2 high_edge = (raster.source.xy + raster.source.zw) * vec2(size);
+  vec2 position = clamp(mix(low_edge, high_edge, coordinate) - vec2(0.5),
+                        max(low_edge, vec2(0.0)), max(high_edge - vec2(1.0), vec2(0.0)));
+  position = min(position, vec2(size - 1));
   ivec2 low = ivec2(floor(position));
   ivec2 high = min(low + 1, size - 1);
   vec2 fraction = fract(position);

@@ -1541,6 +1541,217 @@ DecodedRaster decode_pnm(std::span<const std::uint8_t> bytes) {
 
 }  // namespace
 
+// ---------------------------------------------------------------------------
+// PNG encoding: per-row filters picked by the smallest sum of absolute
+// differences, deflated with LZ77 (hash chains) and the fixed Huffman codes.
+
+namespace {
+
+class LsbWriter {
+ public:
+  std::vector<std::uint8_t> out;
+  void bits(std::uint32_t value, int count) {
+    buffer_ |= static_cast<std::uint64_t>(value) << count_;
+    count_ += count;
+    while (count_ >= 8) {
+      out.push_back(static_cast<std::uint8_t>(buffer_));
+      buffer_ >>= 8;
+      count_ -= 8;
+    }
+  }
+  // Huffman codes go most significant bit first.
+  void code(std::uint32_t value, int length) {
+    std::uint32_t reversed = 0;
+    for (int i = 0; i < length; ++i) reversed |= ((value >> i) & 1U) << (length - 1 - i);
+    bits(reversed, length);
+  }
+  void flush() {
+    if (count_ > 0) bits(0, 8 - count_);
+  }
+
+ private:
+  std::uint64_t buffer_ = 0;
+  int count_ = 0;
+};
+
+void literal_code(LsbWriter& out, unsigned symbol) {
+  if (symbol < 144) out.code(0x30 + symbol, 8);
+  else if (symbol < 256) out.code(0x190 + symbol - 144, 9);
+  else if (symbol < 280) out.code(symbol - 256, 7);
+  else out.code(0xC0 + symbol - 280, 8);
+}
+
+std::vector<std::uint8_t> deflate_fixed(const std::vector<std::uint8_t>& data) {
+  static constexpr std::array<std::uint16_t, 29> length_base{
+      3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258};
+  static constexpr std::array<std::uint8_t, 29> length_extra{
+      0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0};
+  static constexpr std::array<std::uint16_t, 30> distance_base{
+      1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193,
+      257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577};
+  static constexpr std::array<std::uint8_t, 30> distance_extra{
+      0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13};
+  constexpr std::size_t window = 32768, max_chain = 48;
+  constexpr int hash_bits = 15;
+  LsbWriter out;
+  out.bits(1, 1);  // final block
+  out.bits(1, 2);  // fixed codes
+  std::vector<std::int32_t> head(1U << hash_bits, -1);
+  std::vector<std::int32_t> previous(data.size(), -1);
+  const auto hash = [&](std::size_t i) {
+    return ((static_cast<std::uint32_t>(data[i]) << 16U | static_cast<std::uint32_t>(data[i + 1]) << 8U | data[i + 2]) *
+            2654435761U) >> (32 - hash_bits);
+  };
+  const auto insert = [&](std::size_t i) {
+    if (i + 2 >= data.size()) return;
+    const std::uint32_t h = hash(i);
+    previous[i] = head[h];
+    head[h] = static_cast<std::int32_t>(i);
+  };
+  std::size_t i = 0;
+  while (i < data.size()) {
+    std::size_t best_length = 0, best_distance = 0;
+    if (i + 2 < data.size()) {
+      std::int32_t candidate = head[hash(i)];
+      for (std::size_t chain = 0; candidate >= 0 && chain < max_chain; ++chain) {
+        const auto start = static_cast<std::size_t>(candidate);
+        if (i - start > window) break;
+        std::size_t length = 0;
+        const std::size_t limit = std::min<std::size_t>(258, data.size() - i);
+        while (length < limit && data[start + length] == data[i + length]) ++length;
+        if (length > best_length) {
+          best_length = length;
+          best_distance = i - start;
+          if (length == limit) break;
+        }
+        candidate = previous[start];
+      }
+    }
+    if (best_length >= 3) {
+      std::size_t code = 0;
+      while (code + 1 < length_base.size() && length_base[code + 1] <= best_length) ++code;
+      literal_code(out, static_cast<unsigned>(257 + code));
+      out.bits(static_cast<std::uint32_t>(best_length - length_base[code]), length_extra[code]);
+      std::size_t distance_code = 0;
+      while (distance_code + 1 < distance_base.size() && distance_base[distance_code + 1] <= best_distance) ++distance_code;
+      out.code(static_cast<std::uint32_t>(distance_code), 5);
+      out.bits(static_cast<std::uint32_t>(best_distance - distance_base[distance_code]), distance_extra[distance_code]);
+      for (std::size_t k = 0; k < best_length; ++k) insert(i + k);
+      i += best_length;
+    } else {
+      literal_code(out, data[i]);
+      insert(i);
+      ++i;
+    }
+  }
+  literal_code(out, 256);
+  out.flush();
+  return std::move(out.out);
+}
+
+std::uint32_t crc32(const std::uint8_t* data, std::size_t size, std::uint32_t crc = 0) {
+  static const std::array<std::uint32_t, 256> table = [] {
+    std::array<std::uint32_t, 256> t{};
+    for (std::uint32_t n = 0; n < 256; ++n) {
+      std::uint32_t c = n;
+      for (int k = 0; k < 8; ++k) c = (c & 1U) != 0 ? 0xEDB88320U ^ (c >> 1U) : c >> 1U;
+      t[n] = c;
+    }
+    return t;
+  }();
+  crc = ~crc;
+  for (std::size_t i = 0; i < size; ++i) crc = table[(crc ^ data[i]) & 255U] ^ (crc >> 8U);
+  return ~crc;
+}
+
+void put32(std::vector<std::uint8_t>& out, std::uint32_t value) {
+  for (int shift = 24; shift >= 0; shift -= 8) out.push_back(static_cast<std::uint8_t>(value >> shift));
+}
+
+void chunk(std::vector<std::uint8_t>& out, const char (&kind)[5], const std::vector<std::uint8_t>& data) {
+  put32(out, static_cast<std::uint32_t>(data.size()));
+  const std::size_t start = out.size();
+  out.insert(out.end(), kind, kind + 4);
+  out.insert(out.end(), data.begin(), data.end());
+  put32(out, crc32(out.data() + start, out.size() - start));
+}
+
+}  // namespace
+
+std::vector<std::uint8_t> encode_png(std::uint32_t width, std::uint32_t height, const std::uint32_t* rgba,
+                                     const std::uint64_t* rgba16) {
+  const bool deep = rgba16 != nullptr;
+  const std::size_t bpp = deep ? 8 : 4;
+  const std::size_t stride = static_cast<std::size_t>(width) * bpp;
+  std::vector<std::uint8_t> raw(stride), previous(stride, 0), filtered((stride + 1) * height);
+  std::array<std::vector<std::uint8_t>, 5> candidates;
+  for (auto& candidate : candidates) candidate.resize(stride);
+  for (std::uint32_t y = 0; y < height; ++y) {
+    for (std::uint32_t x = 0; x < width; ++x) {
+      const std::size_t i = static_cast<std::size_t>(y) * width + x;
+      std::uint8_t* p = raw.data() + static_cast<std::size_t>(x) * bpp;
+      if (deep) {
+        for (int c = 0; c < 4; ++c) {
+          const auto value = static_cast<std::uint16_t>(rgba16[i] >> (16 * c));
+          p[2 * c] = static_cast<std::uint8_t>(value >> 8U);
+          p[2 * c + 1] = static_cast<std::uint8_t>(value);
+        }
+      } else {
+        for (int c = 0; c < 4; ++c) p[c] = static_cast<std::uint8_t>(rgba[i] >> (8 * c));
+      }
+    }
+    std::size_t best = 0, best_cost = ~std::size_t{0};
+    for (std::size_t filter = 0; filter < 5; ++filter) {
+      std::size_t cost = 0;
+      for (std::size_t k = 0; k < stride; ++k) {
+        const int a = k >= bpp ? raw[k - bpp] : 0, b = previous[k], c = k >= bpp ? previous[k - bpp] : 0;
+        int predicted = 0;
+        switch (filter) {
+          case 1: predicted = a; break;
+          case 2: predicted = b; break;
+          case 3: predicted = (a + b) / 2; break;
+          case 4: {
+            const int pa = std::abs(b - c), pb = std::abs(a - c), pc = std::abs(a + b - 2 * c);
+            predicted = pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+            break;
+          }
+          default: break;
+        }
+        const auto value = static_cast<std::uint8_t>(raw[k] - predicted);
+        candidates[filter][k] = value;
+        cost += static_cast<std::size_t>(std::abs(static_cast<std::int8_t>(value)));
+      }
+      if (cost < best_cost) {
+        best_cost = cost;
+        best = filter;
+      }
+    }
+    std::uint8_t* row = filtered.data() + static_cast<std::size_t>(y) * (stride + 1);
+    row[0] = static_cast<std::uint8_t>(best);
+    std::memcpy(row + 1, candidates[best].data(), stride);
+    std::swap(previous, raw);
+  }
+  std::vector<std::uint8_t> zlib{0x78, 0x01};
+  const std::vector<std::uint8_t> deflated = deflate_fixed(filtered);
+  zlib.insert(zlib.end(), deflated.begin(), deflated.end());
+  std::uint32_t a = 1, b = 0;
+  for (const std::uint8_t byte : filtered) {
+    a = (a + byte) % 65521U;
+    b = (b + a) % 65521U;
+  }
+  put32(zlib, b << 16U | a);
+
+  std::vector<std::uint8_t> png{0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
+  std::vector<std::uint8_t> header;
+  put32(header, width);
+  put32(header, height);
+  header.insert(header.end(), {static_cast<std::uint8_t>(deep ? 16 : 8), 6, 0, 0, 0});
+  chunk(png, "IHDR", header);
+  chunk(png, "IDAT", zlib);
+  chunk(png, "IEND", {});
+  return png;
+}
+
 bool is_webp(std::span<const std::uint8_t> bytes) {
   return bytes.size() >= 12 && std::memcmp(bytes.data(), "RIFF", 4) == 0 &&
          std::memcmp(bytes.data() + 8, "WEBP", 4) == 0;

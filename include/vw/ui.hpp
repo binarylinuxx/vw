@@ -196,6 +196,11 @@ struct ImageProps {
   float height = 0.0F;
   // Applies when both width and height are set.
   ImageFit fit = ImageFit::stretch;
+  // Files only. async: decode on a worker thread and draw nothing (keeping
+  // the box) until ready. animated: the size changes every frame; the GPU
+  // scales a cached mipmap instead of resampling on the CPU. See ImageLoad.
+  bool async = false;
+  bool animated = false;
   float radius = 0.0F;
   Color tint{1.0F, 1.0F, 1.0F, 1.0F};
   ImageEffect effect;

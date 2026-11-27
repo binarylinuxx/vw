@@ -11,6 +11,8 @@
 #include "vw/outputs.hpp"
 #include "vw/host.hpp"
 #include "vw/hyprland.hpp"
+#include "vw/icon.hpp"
+#include "vw/image.hpp"
 #include "vw/ipc.hpp"
 #include "vw/image.hpp"
 #include "vw/mpris.hpp"

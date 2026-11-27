@@ -50,7 +50,12 @@ class WaylandWidget {
   // which makes the other surfaces rebuild too.
   void refresh(bool input) { refresh_scene(input); }
   // Handles a delivered animation frame callback.
-  void tick(std::chrono::steady_clock::time_point now);
+  // Draws an animation frame when its frame callback came; true when that
+  // rebuilt the scene (so it already shows the newest state).
+  bool tick(std::chrono::steady_clock::time_point now);
+  // An animating surface expecting a frame callback soon: a rebuild for new
+  // state can wait for that frame instead of rendering an extra one.
+  bool frame_coming(std::chrono::steady_clock::time_point now) const;
   // When the next key repeat is due, and firing it.
   std::optional<std::chrono::steady_clock::time_point> deadline() const;
   void timers(std::chrono::steady_clock::time_point now);
@@ -198,6 +203,13 @@ class WaylandWidget {
   std::uint32_t frame_callback_ = 0;
   bool animation_frame_ready_ = false;
   std::chrono::steady_clock::time_point animation_last_tick_{};
+  // Frame pacing: the compositor's refresh period, estimated from frame
+  // callback timestamps, and the evenly spaced time of the last frame.
+  std::chrono::steady_clock::duration frame_period_ = std::chrono::microseconds(16667);
+  std::chrono::steady_clock::time_point paced_time_{};
+  std::uint32_t last_callback_ms_ = 0;
+  bool has_callback_ms_ = false;
+  std::chrono::steady_clock::time_point pace(std::chrono::steady_clock::time_point now);
   bool dragging_ = false;
   DragHandler drag_move_;
   DragHandler drag_end_;

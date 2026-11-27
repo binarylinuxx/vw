@@ -66,6 +66,10 @@ The returned widget has the text's logical size, ready for centring with `ui.mov
 | `bitmap` | pixels in memory, such as a [screen capture](/compositor/capture/) |
 | `width`, `height`, `fit` | `0` keeps the natural size or aspect; `fit` is `stretch`, `contain` or `cover` |
 | `radius`, `mask`, `tint`, `effect` | see [Clipping, fading, masks](/guides/composition/) |
+| `async` | decode the file on a worker thread; the box stays empty until it is ready, then the surface rebuilds |
+| `animated` | for sizes that change every frame (carousels): the GPU scales a cached mipmap instead of resampling each size on the CPU |
+
+From C++, `<vw/image.hpp>` also has `load_image` (decode and downscale into a `Bitmap`), `save_png` (8 or 16 bits), `preload_image` and `image_ready`, for thumbnail caches and warming up wallpapers.
 
 ## canvas
 

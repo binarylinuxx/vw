@@ -25,6 +25,10 @@ std::vector<std::uint8_t> zlib_decompress(std::span<const std::uint8_t> data, st
 std::vector<std::uint8_t> gzip_decompress(std::span<const std::uint8_t> data, std::size_t limit);
 // A CSS colour (names, #hex, rgb[a](), hsl[a](), transparent) as RGBA 0..1.
 std::optional<std::array<double, 4>> parse_css_color(std::string_view text);
+// A PNG of RGBA pixels: 8-bit from rgba, or 16-bit from rgba16 (the other
+// pointer null), in the packings DecodedRaster uses.
+std::vector<std::uint8_t> encode_png(std::uint32_t width, std::uint32_t height, const std::uint32_t* rgba,
+                                     const std::uint64_t* rgba16);
 // Drops 16-bit pixels to 8 bits when that loses nothing.
 void narrow_if_exact(DecodedRaster& image);
 DecodedRaster decode_webp(std::span<const std::uint8_t> bytes);

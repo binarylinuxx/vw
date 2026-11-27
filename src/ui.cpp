@@ -394,7 +394,16 @@ Widget Ui::image(const ImageProps& props) {
         ? resolve_icon(props.icon, static_cast<int>(std::max({48.0F, props.width, props.height})))
         : std::filesystem::path(props.path);
     if (source.empty()) throw std::runtime_error("icon was not found: " + props.icon);
-    size = add_image(scene_, source, props.width, props.height, style, props.fit);
+    if (!add_image(scene_, source, props.width, props.height, style, props.fit,
+                   ImageLoad{props.async, props.animated}, &size)) {
+      // Still decoding: the box is kept, with nothing in it yet.
+      Rectangle carrier = style;
+      carrier.width = size.first;
+      carrier.height = size.second;
+      carrier.visible = false;
+      scene_.add(carrier);
+      return push(begin, size.first, size.second, style, props.input);
+    }
   }
   scene_.rasters.back().effect = props.effect;
   scene_.rasters.back().mask = props.mask;

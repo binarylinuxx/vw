@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <functional>
 #include <string>
@@ -24,6 +25,9 @@ struct Tween {
   double mass = 1;
   double stiffness = 180;
   double damping = 18;
+  // Value per second carried in from the tween this one replaced. Springs
+  // start with it; eased tweens add a Hermite term that keeps the motion
+  // continuous and fades out by the end.
   double velocity = 0;
   double minimum = -std::numeric_limits<double>::infinity();
   double maximum = std::numeric_limits<double>::infinity();
@@ -37,6 +41,7 @@ bool active = false;
 // One instant per build, so every tween in a frame samples the same time and
 // moves in lockstep, however long the build itself takes.
 std::optional<Clock::time_point> frame_now;
+std::optional<Clock::time_point> next_frame_time;
 double ease(double t, Easing mode) {
   switch (mode) {
     case Easing::linear: return t;
@@ -62,9 +67,20 @@ double bezier_value(double t, const std::array<double, 4>& control) {
   }
   return curve((lo + hi) / 2, control[1], control[3]);
 }
+double eased(const Tween& tween, double t) {
+  return tween.easing == Easing::bezier ? bezier_value(t, tween.bezier) : ease(t, tween.easing);
+}
+
+// The easing curve's slope, numerically.
+double slope(const Tween& tween, double t) {
+  constexpr double step = 1e-4;
+  const double low = std::max(0.0, t - step), high = std::min(1.0, t + step);
+  return (eased(tween, high) - eased(tween, low)) / (high - low);
+}
+
 struct Sample { double value; double velocity; bool running; };
 Sample sample(const Tween& tween, Clock::time_point now) {
-  const double elapsed = std::chrono::duration<double>(now - tween.started).count();
+  const double elapsed = std::max(0.0, std::chrono::duration<double>(now - tween.started).count());
   if (tween.duration <= 0) return {tween.target, 0, false};
   if (tween.easing == Easing::spring) {
     const double omega = std::sqrt(tween.stiffness / tween.mass);
@@ -100,12 +116,18 @@ Sample sample(const Tween& tween, Clock::time_point now) {
     const double bounded = std::clamp(raw, tween.minimum, tween.maximum);
     return {bounded, raw == bounded ? velocity : 0, true};
   }
-  const double t = tween.duration <= 0 ? 1 : std::clamp(
-      elapsed / tween.duration, 0.0, 1.0);
-  const double progress = tween.easing == Easing::bezier ? bezier_value(t, tween.bezier) : ease(t, tween.easing);
-  const double result = tween.from + (tween.target - tween.from) * progress;
-  const bool running = tween.from != tween.target && t < 1;
-  return {std::clamp(running ? result : tween.target, tween.minimum, tween.maximum), 0, running};
+  const double t = std::clamp(elapsed / tween.duration, 0.0, 1.0);
+  const double delta = tween.target - tween.from;
+  // Carried velocity, minus what the curve itself starts with, enters through
+  // h(t) = t(1-t)^2: zero at both ends, slope 1 at the start, flat at the end.
+  const double carried = tween.velocity == 0 ? 0 : tween.velocity - delta * slope(tween, 0) / tween.duration;
+  const double hermite = t * (1 - t) * (1 - t);
+  const double result = tween.from + delta * eased(tween, t) + carried * tween.duration * hermite;
+  const double velocity = delta * slope(tween, t) / tween.duration + carried * (3 * t * t - 4 * t + 1);
+  const bool running = (tween.from != tween.target || carried != 0) && t < 1;
+  if (!running) return {std::clamp(tween.target, tween.minimum, tween.maximum), 0, false};
+  const double bounded = std::clamp(result, tween.minimum, tween.maximum);
+  return {bounded, bounded == result ? velocity : 0, true};
 }
 }  // namespace
 
@@ -172,8 +194,10 @@ double animate(std::string_view id, double target, const AnimationOptions& optio
 
 void begin_animation_frame() {
   active = false;
-  frame_now = Clock::now();
+  frame_now = next_frame_time.value_or(Clock::now());
+  next_frame_time.reset();
 }
+void set_next_frame_time(Clock::time_point time) { next_frame_time = time; }
 bool animations_active() {
   // Ends the build: tweens started from handlers use the real time again.
   frame_now.reset();

@@ -1696,7 +1696,19 @@ void WaylandWidget::add_frame_callback(std::uint32_t surface) {
   callback->set_observer([this](client::Proxy& proxy, std::uint32_t opcode,
                                 wire::MessageParser& parser) {
     if (opcode != 0) return;
-    (void)parser.read_uint();
+    // Callback times (milliseconds) of consecutive frames give the refresh
+    // period; a running average smooths their whole-millisecond steps.
+    const std::uint32_t time = parser.read_uint();
+    if (has_callback_ms_) {
+      const std::uint32_t delta = time - last_callback_ms_;
+      if (delta >= 4 && delta <= 50) {
+        const auto sample = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::milliseconds(delta));
+        frame_period_ = (frame_period_ * 7 + sample) / 8;
+      }
+    }
+    last_callback_ms_ = time;
+    has_callback_ms_ = true;
     frame_callback_ = 0;
     animation_frame_ready_ = true;
     display_->destroy_proxy(proxy.id);
@@ -1846,24 +1858,51 @@ bool WaylandWidget::dispatch(short revents) {
   return true;
 }
 
-void WaylandWidget::tick(std::chrono::steady_clock::time_point now) {
+// Frames are timed one refresh period apart while they keep coming on time,
+// so jitter in when vw wakes up does not show as uneven motion. A late or
+// early frame resynchronizes with the real time.
+std::chrono::steady_clock::time_point WaylandWidget::pace(std::chrono::steady_clock::time_point now) {
+  const auto next = paced_time_ + frame_period_;
+  const auto off = now > next ? now - next : next - now;
+  paced_time_ = paced_time_ != std::chrono::steady_clock::time_point{} && off < frame_period_ / 2 ? next : now;
+  return paced_time_;
+}
+
+bool WaylandWidget::frame_coming(std::chrono::steady_clock::time_point now) const {
+  return scene_.animating && frame_callback_ != 0 && animation_last_tick_ != std::chrono::steady_clock::time_point{} &&
+         now - animation_last_tick_ < std::chrono::milliseconds(250);
+}
+
+bool WaylandWidget::tick(std::chrono::steady_clock::time_point now) {
   // A frame callback may never come when nothing was damaged (a drag step that
   // changed nothing commits no buffer): a drag must not wait on it.
   if (drag_refresh_pending_ && now - drag_frame_at_ >= drag_frame_limit) animation_frame_ready_ = true;
-  if (!animation_frame_ready_ || renderer_ == nullptr) return;
+  if (!animation_frame_ready_ || renderer_ == nullptr) return false;
   animation_frame_ready_ = false;
-  const float elapsed = std::chrono::duration<float>(now - animation_last_tick_).count();
+  const auto previous = paced_time_;
+  const auto paced = pace(now);
+  const float elapsed = previous == std::chrono::steady_clock::time_point{}
+      ? std::chrono::duration<float>(now - animation_last_tick_).count()
+      : std::chrono::duration<float>(paced - previous).count();
   animation_last_tick_ = now;
   const bool hover_changed = animate_hover(elapsed);
+  // What this frame draws is on screen about one refresh from now.
   if (drag_refresh_pending_) {
     drag_refresh_pending_ = false;
     drag_frame_at_ = now;
+    set_next_frame_time(paced + frame_period_);
     refresh_scene(true);
-  } else if (scene_.animating) {
-    refresh_scene(false);
-  } else if (hover_changed) {
-    reload(scene_, renderer_->render(scene_));
+    return true;
   }
+  if (scene_.animating) {
+    set_next_frame_time(paced + frame_period_);
+    refresh_scene(false);
+    return true;
+  }
+  // Motion stopped: the next animation starts its pacing afresh.
+  paced_time_ = {};
+  if (hover_changed) reload(scene_, renderer_->render(scene_));
+  return false;
 }
 
 std::optional<std::chrono::steady_clock::time_point> WaylandWidget::deadline() const {
@@ -1900,6 +1939,9 @@ struct Slot {
   // Last periodic (or full) rebuild; each surface keeps its own
   // refresh_interval, so a slow surface is not rebuilt at a fast one's rate.
   std::chrono::steady_clock::time_point refreshed = std::chrono::steady_clock::now();
+  // Rebuilt by its animation frame this iteration, or about to be: other
+  // rebuilds leave it alone so it renders once per frame.
+  bool fresh = false;
 
   // Unmapped surfaces are probed once a second, as before.
   double interval() const { return widget ? widget->scene().refresh_interval : 1.0; }
@@ -1937,7 +1979,7 @@ void synchronize(std::span<Slot> slots, Renderer& renderer, bool everything) {
       materialize(slot, renderer);
       continue;
     }
-    if (!everything && slot.widget->input_epoch() == global_input_epoch) continue;
+    if (slot.fresh || (!everything && slot.widget->input_epoch() == global_input_epoch)) continue;
     slot.widget->refresh(false);
     slot.widget->mark_epoch(global_input_epoch);
   }
@@ -2061,7 +2103,22 @@ void run_surfaces(SceneSource& shared, std::span<SceneSource* const> surfaces, R
       }
     }
 
+    // Animation frames go first: a surface whose frame callback arrived
+    // rebuilds and renders now, with whatever state the events above brought.
+    // An animating surface whose frame is due soon waits for it rather than
+    // rendering an extra time for an event.
     const auto now = std::chrono::steady_clock::now();
+    for (Slot& slot : slots) {
+      slot.fresh = false;
+      if (!slot.widget) continue;
+      if (slot.widget->tick(now)) {
+        slot.fresh = true;
+        slot.widget->mark_epoch(global_input_epoch);
+      } else if (!force_reload && slot.widget->frame_coming(now)) {
+        slot.fresh = true;
+      }
+    }
+
     bool changed = service_changed || force_reload || closed_any;
     alignas(inotify_event) std::array<char, 4096> buffer{};
     for (ssize_t count = 0; readable(watch_fd) &&
@@ -2080,7 +2137,7 @@ void run_surfaces(SceneSource& shared, std::span<SceneSource* const> surfaces, R
       // animation when a surface is occluded and the compositor has stopped
       // delivering frame callbacks: an animating surface redraws on its own.
       for (Slot& slot : slots) {
-        if (now < slot.due()) continue;
+        if (now < slot.due() || slot.fresh) continue;
         slot.refreshed = now;
         if (!slot.widget) {
           slot.absent_epoch = global_input_epoch;
@@ -2093,9 +2150,6 @@ void run_surfaces(SceneSource& shared, std::span<SceneSource* const> surfaces, R
       // Input on one surface changes state the others may draw.
       synchronize(slots, renderer, false);
     }
-
-    for (Slot& slot : slots)
-      if (slot.widget) slot.widget->tick(now);
   }
 }
 

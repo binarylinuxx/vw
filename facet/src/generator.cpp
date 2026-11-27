@@ -67,6 +67,7 @@ const std::vector<Element>& elements() {
       {"vw.ui", "Image", Kind::image, "vw::ImageProps",
        {{"path", "path", string}, {"icon", "icon", string}, {"width", "width", number},
         {"height", "height", number}, {"fit", "fit", Type::fit}, {"radius", "radius", number},
+        {"async", "async", boolean}, {"animated", "animated", boolean},
         {"padding", "place.margin", Type::padding}, {"input", "input", input}}, "path", ""},
       {"vw.ui", "TextField", Kind::text_field, "vw::TextFieldProps",
        {{"id", "id", string}, {"value", "value", string}, {"placeholder", "placeholder", string},
