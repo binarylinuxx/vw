@@ -155,6 +155,10 @@ struct RectangleProps {
   // (`readonly buffer { uint words[]; }`, uintBitsToFloat), starting at word
   // clip_params.y, clip_params.z floats long.
   std::vector<float> shader_data;
+  // Further passes, in order, after shader (or the plain fill when shader is
+  // empty). Each pass has its own shader, params and data; one that samples
+  // the backdrop reads what the passes before it drew.
+  std::vector<ShaderPass> shader_passes;
   Placement place;
   Input input;
 };

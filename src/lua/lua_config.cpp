@@ -424,6 +424,37 @@ void resolve_field(lua_State* lua, int table, const char* name) {
   }
 }
 
+// Up to four numbers from table[name] into params; missing ones stay.
+void shader_params_field(lua_State* lua, int table, const char* name, std::array<float, 4>& params) {
+  lua_getfield(lua, table, name);
+  if (!lua_isnil(lua, -1)) {
+    luaL_checktype(lua, -1, LUA_TTABLE);
+    for (int index = 0; index < 4; ++index) {
+      lua_geti(lua, -1, index + 1);
+      if (!lua_isnil(lua, -1))
+        params[static_cast<std::size_t>(index)] = static_cast<float>(luaL_checknumber(lua, -1));
+      lua_pop(lua, 1);
+    }
+  }
+  lua_pop(lua, 1);
+}
+
+// A list of numbers from table[name].
+void shader_data_field(lua_State* lua, int table, const char* name, std::vector<float>& data) {
+  lua_getfield(lua, table, name);
+  if (!lua_isnil(lua, -1)) {
+    luaL_checktype(lua, -1, LUA_TTABLE);
+    const lua_Integer count = luaL_len(lua, -1);
+    data.reserve(static_cast<std::size_t>(count));
+    for (lua_Integer index = 1; index <= count; ++index) {
+      lua_geti(lua, -1, index);
+      data.push_back(static_cast<float>(luaL_checknumber(lua, -1)));
+      lua_pop(lua, 1);
+    }
+  }
+  lua_pop(lua, 1);
+}
+
 int add_rectangle(lua_State* lua) {
   luaL_checktype(lua, 1, LUA_TTABLE);
   RectangleProps props;
@@ -443,14 +474,21 @@ int add_rectangle(lua_State* lua) {
   else if (gradient == "vertical") props.gradient = Gradient::vertical;
   else if (gradient != "none") throw std::invalid_argument("invalid gradient '" + gradient + "'");
   props.shader = string_field(lua, 1, "shader");
-  lua_getfield(lua, 1, "shader_params");
+  shader_params_field(lua, 1, "shader_params", props.shader_params);
+  shader_data_field(lua, 1, "shader_data", props.shader_data);
+  lua_getfield(lua, 1, "shader_passes");
   if (!lua_isnil(lua, -1)) {
     luaL_checktype(lua, -1, LUA_TTABLE);
-    for (int index = 0; index < 4; ++index) {
-      lua_geti(lua, -1, index + 1);
-      if (!lua_isnil(lua, -1))
-        props.shader_params[static_cast<std::size_t>(index)] =
-            static_cast<float>(luaL_checknumber(lua, -1));
+    const int passes = lua_absindex(lua, -1);
+    const lua_Integer count = luaL_len(lua, passes);
+    for (lua_Integer index = 1; index <= count; ++index) {
+      lua_geti(lua, passes, index);
+      luaL_checktype(lua, -1, LUA_TTABLE);
+      const int entry = lua_absindex(lua, -1);
+      ShaderPass& pass = props.shader_passes.emplace_back();
+      pass.shader = string_field(lua, entry, "shader");
+      shader_params_field(lua, entry, "params", pass.params);
+      shader_data_field(lua, entry, "data", pass.data);
       lua_pop(lua, 1);
     }
   }

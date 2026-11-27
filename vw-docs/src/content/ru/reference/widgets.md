@@ -33,7 +33,7 @@ const vw::Widget w = ui.rectangle({.width = 200, .height = 40, .radius = 12,
 | `corner_radii` | `{top_left, top_right, bottom_right, bottom_left}`; незаданные берут `radius` |
 | `color`, `color2`, `gradient` | заливка, вторая точка, `none` / `horizontal` / `vertical` |
 | `border_width`, `border_color` | рамка внутрь |
-| `shader`, `shader_params`, `shader_data` | [свой шейдер](/ru/guides/shaders/) |
+| `shader`, `shader_params`, `shader_data`, `shader_passes` | [свой шейдер](/ru/guides/shaders/) |
 
 Градиент идёт от `color` к `color2` слева направо (`horizontal`) или сверху вниз (`vertical`) и обрезается по скруглённым углам:
 

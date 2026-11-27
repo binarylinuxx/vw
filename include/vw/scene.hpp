@@ -116,6 +116,18 @@ using AuthenticationHandler = std::function<void(bool authenticated)>;
 using FocusHandler = std::function<void(const FocusEvent&)>;
 using CloseHandler = std::function<void()>;
 
+// One more compute pass over a rectangle, run after its shader (or its
+// plain fill) and before what follows it. A pass that samples the backdrop
+// sees everything drawn so far, earlier passes of the same rectangle
+// included, so passes chain: blur across, then down.
+struct ShaderPass {
+  std::string shader;
+  std::array<float, 4> params{0.0F, 0.0F, 0.0F, 0.0F};
+  std::vector<float> data;
+
+  bool operator==(const ShaderPass&) const = default;
+};
+
 struct Rectangle {
   float x = 0.0F;
   float y = 0.0F;
@@ -147,6 +159,7 @@ struct Rectangle {
   std::string shader;
   std::array<float, 4> shader_params{0.0F, 0.0F, 0.0F, 0.0F};
   std::vector<float> shader_data;
+  std::vector<ShaderPass> shader_passes;
 
   bool operator==(const Rectangle&) const = default;
 };

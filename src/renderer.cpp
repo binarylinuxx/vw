@@ -420,10 +420,16 @@ Frame Renderer::render(const Scene& scene) const {
   VkImage backdrop = VK_NULL_HANDLE;
   VkDeviceMemory backdrop_memory = VK_NULL_HANDLE;
   VkImageView backdrop_view = VK_NULL_HANDLE;
-  std::vector<VkPipeline> rectangle_pipelines;
-  // Whether each rectangle's shader samples the backdrop (binding 2); only
-  // those pay for the full-surface copy.
-  std::vector<bool> reads_backdrop;
+  // What each rectangle runs: its shader (or plain fill), then its passes.
+  // Only steps that sample the backdrop (binding 2) pay for the full-surface
+  // copy, taken right before them so they see the steps before.
+  struct Step {
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    bool reads_backdrop = false;
+    // shader_passes index, or -1 for the rectangle's own shader.
+    std::ptrdiff_t pass = -1;
+  };
+  std::vector<std::vector<Step>> rectangle_steps;
   // One time for every shader in the frame, so they move together.
   const float time = shader_time();
   const ColorDepth depth = scene.color_depth;
@@ -431,17 +437,24 @@ Frame Renderer::render(const Scene& scene) const {
   const VkFormat format = vulkan_format(depth);
   const VkPipeline plain_pipeline = state_->rectangle_builtin(depth);
   const VkPipeline raster_pipeline = state_->raster_builtin(depth);
-  rectangle_pipelines.reserve(scene.rectangles.size());
-  reads_backdrop.reserve(scene.rectangles.size());
+  rectangle_steps.reserve(scene.rectangles.size());
+  bool needs_backdrop = false;
   for (const Rectangle& rectangle : scene.rectangles) {
-    const auto shader = rectangle.visible ? state_->rectangle_pipeline(rectangle.shader, depth)
-                                          : State::ShaderPipeline{plain_pipeline, {}, 0, false};
-    rectangle_pipelines.push_back(shader.pipeline);
-    reads_backdrop.push_back((shader.flags & vws::reads_backdrop) != 0);
+    auto& steps = rectangle_steps.emplace_back();
+    if (!rectangle.visible) continue;
+    const auto shader = state_->rectangle_pipeline(rectangle.shader, depth);
+    steps.push_back({shader.pipeline, (shader.flags & vws::reads_backdrop) != 0, -1});
+    for (std::size_t pass = 0; pass < rectangle.shader_passes.size(); ++pass) {
+      const auto loaded = state_->rectangle_pipeline(rectangle.shader_passes[pass].shader, depth);
+      // A pass that failed to load is left out rather than filling again.
+      if (!loaded.owned) continue;
+      steps.push_back({loaded.pipeline, (loaded.flags & vws::reads_backdrop) != 0,
+                       static_cast<std::ptrdiff_t>(pass)});
+    }
+    for (const Step& step : steps) needs_backdrop = needs_backdrop || step.reads_backdrop;
   }
   // The snapshot image exists only when some shader samples it; otherwise
   // binding 2 just aliases the target and is never read.
-  const bool needs_backdrop = std::ranges::find(reads_backdrop, true) != reads_backdrop.end();
   VkBuffer raster_buffer = VK_NULL_HANDLE;
   VkDeviceMemory raster_memory = VK_NULL_HANDLE;
   VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
@@ -558,12 +571,20 @@ Frame Renderer::render(const Scene& scene) const {
     }
     // Custom shader data follows the pixels in the same buffer; the shader
     // finds it through clip_params.y (offset) and .z (count).
+    // Each pass's data follows its rectangle's, in pass order.
     std::vector<std::uint32_t> data_offsets(scene.rectangles.size(), 0);
+    std::vector<std::vector<std::uint32_t>> pass_offsets(scene.rectangles.size());
+    const auto append_data = [&](const std::vector<float>& data) {
+      const auto offset = static_cast<std::uint32_t>(raster_pixels.size());
+      for (float value : data) raster_pixels.push_back(std::bit_cast<std::uint32_t>(value));
+      return offset;
+    };
     for (std::size_t index = 0; index < scene.rectangles.size(); ++index) {
       const Rectangle& rectangle = scene.rectangles[index];
-      if (rectangle.shader.empty() || rectangle.shader_data.empty()) continue;
-      data_offsets[index] = static_cast<std::uint32_t>(raster_pixels.size());
-      for (float value : rectangle.shader_data) raster_pixels.push_back(std::bit_cast<std::uint32_t>(value));
+      if (!rectangle.shader.empty() && !rectangle.shader_data.empty())
+        data_offsets[index] = append_data(rectangle.shader_data);
+      for (const ShaderPass& pass : rectangle.shader_passes)
+        pass_offsets[index].push_back(pass.data.empty() ? 0 : append_data(pass.data));
     }
     // Image masks follow them; the raster shader finds its own through the
     // spare fourth components of its effect and colorize constants.
@@ -686,6 +707,36 @@ Frame Renderer::render(const Scene& scene) const {
                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1,
                            &barrier);
     };
+    // Copies the surface as drawn so far into the backdrop image.
+    const auto snapshot = [&] {
+      std::array<VkImageMemoryBarrier, 2> copies{{barrier, barrier}};
+      copies[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+      copies[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+      copies[0].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+      copies[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      copies[1].image = backdrop;
+      copies[1].srcAccessMask = backdrop_initialized ? VK_ACCESS_SHADER_READ_BIT : 0;
+      copies[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+      copies[1].oldLayout = backdrop_initialized ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_UNDEFINED;
+      copies[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+          VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, copies.size(), copies.data());
+      const VkImageCopy region{{VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0},
+          {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {scene.width, scene.height, 1}};
+      vkCmdCopyImage(command, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                     backdrop, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+      for (auto& copy : copies) {
+        std::swap(copy.oldLayout, copy.newLayout);
+        copy.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+      }
+      copies[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+      copies[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+      copies[1].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+      copies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+      vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT,
+          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, copies.size(), copies.data());
+      backdrop_initialized = true;
+    };
     for (std::size_t rectangle_index = 0; rectangle_index < scene.rectangles.size(); ++rectangle_index) {
       const Rectangle& rectangle = scene.rectangles[rectangle_index];
       // A carrier is usually invisible itself; its rasters still draw here.
@@ -696,63 +747,43 @@ Frame Renderer::render(const Scene& scene) const {
         draw_carried();
         continue;
       }
-      if (reads_backdrop[rectangle_index]) {
-        std::array<VkImageMemoryBarrier, 2> copies{{barrier, barrier}};
-        copies[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        copies[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        copies[0].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        copies[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        copies[1].image = backdrop;
-        copies[1].srcAccessMask = backdrop_initialized ? VK_ACCESS_SHADER_READ_BIT : 0;
-        copies[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        copies[1].oldLayout = backdrop_initialized ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_UNDEFINED;
-        copies[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, copies.size(), copies.data());
-        const VkImageCopy region{{VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0},
-            {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {scene.width, scene.height, 1}};
-        vkCmdCopyImage(command, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       backdrop, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-        for (auto& copy : copies) {
-          std::swap(copy.oldLayout, copy.newLayout);
-          copy.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+      for (const Step& step : rectangle_steps[rectangle_index]) {
+        if (step.reads_backdrop) snapshot();
+        vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, step.pipeline);
+        std::array<float, 4> shader_params = rectangle.shader_params;
+        float data_offset = static_cast<float>(data_offsets[rectangle_index]);
+        float data_length = static_cast<float>(rectangle.shader_data.size());
+        if (step.pass >= 0) {
+          const ShaderPass& pass = rectangle.shader_passes[static_cast<std::size_t>(step.pass)];
+          shader_params = pass.params;
+          data_offset = static_cast<float>(pass_offsets[rectangle_index][static_cast<std::size_t>(step.pass)]);
+          data_length = static_cast<float>(pass.data.size());
+        } else if (rectangle.shader.empty()) {
+          for (int corner = 0; corner < 4; ++corner)
+            shader_params[corner] = rectangle.corner_radii[corner] < 0.0F
+                ? rectangle.radius : rectangle.corner_radii[corner];
         }
-        copies[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        copies[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-        copies[1].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        copies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, copies.size(), copies.data());
-        backdrop_initialized = true;
+        const PushConstants push{{rectangle.x, rectangle.y, rectangle.width, rectangle.height},
+                                 {rectangle.radius, rectangle.border_width,
+                                  static_cast<float>(rectangle.gradient),
+                                  rectangle.exact_coverage ? 1.0F : 0.0F},
+                                 rectangle.color, rectangle.color2, rectangle.border_color,
+                                 rectangle.clip,
+                                 {rectangle.clip_radius, data_offset, data_length, time},
+                                 shader_params};
+        vkCmdPushConstants(command, state_->pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                           sizeof(push), &push);
+        vkCmdDispatch(command,
+                      (static_cast<std::uint32_t>(std::ceil(rectangle.width)) + 7) / 8,
+                      (static_cast<std::uint32_t>(std::ceil(rectangle.height)) + 7) / 8, 1);
+        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1,
+                             &barrier);
       }
-      vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, rectangle_pipelines[rectangle_index]);
-      auto shader_params = rectangle.shader_params;
-      if (rectangle.shader.empty()) {
-        for (int corner = 0; corner < 4; ++corner)
-          shader_params[corner] = rectangle.corner_radii[corner] < 0.0F
-              ? rectangle.radius : rectangle.corner_radii[corner];
-      }
-      const PushConstants push{{rectangle.x, rectangle.y, rectangle.width, rectangle.height},
-                               {rectangle.radius, rectangle.border_width,
-                                static_cast<float>(rectangle.gradient),
-                                rectangle.exact_coverage ? 1.0F : 0.0F},
-                               rectangle.color, rectangle.color2, rectangle.border_color,
-                                rectangle.clip,
-                                {rectangle.clip_radius, static_cast<float>(data_offsets[rectangle_index]),
-                                 static_cast<float>(rectangle.shader_data.size()), time},
-                                shader_params};
-      vkCmdPushConstants(command, state_->pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                         sizeof(push), &push);
-      vkCmdDispatch(command,
-                    (static_cast<std::uint32_t>(std::ceil(rectangle.width)) + 7) / 8,
-                    (static_cast<std::uint32_t>(std::ceil(rectangle.height)) + 7) / 8, 1);
-      barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-      barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-      barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-      barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-      vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1,
-                           &barrier);
       draw_carried();
     }
     barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;

@@ -60,6 +60,25 @@ ui.rectangle({.width = 420, .height = 220, .shader = "/path/to/tint.comp"});
 
 Save the file and the next frame compiles and uses it, so a shell can let its users drop in their own shaders. glslc must be installed at runtime (`$VW_GLSLC` or `PATH`). A shader that does not compile is reported once on stderr, with glslc's errors, and the rectangle is drawn plainly until the file is fixed. The cache follows the shader file's own time, not the files it `#include`s: touch the shader after editing an include.
 
+## Multiple passes
+
+`.shader_passes` runs more compute passes over the same rectangle, in order, after `.shader` (or after the plain fill when `.shader` is empty). Each pass has its own shader, `params` (read as `vw_param()`) and `data` (read as `vw_data()`). A pass that defines `VW_USE_BACKDROP` gets a fresh copy of the surface taken right before it, so it sees what the earlier passes drew, and passes chain. A two-pass blur can use one shader, with the direction in its params:
+
+```cpp
+ui.rectangle({.width = 420, .height = 220, .color = vw::rgba(0x00000000),
+              .shader_passes = {{.shader = "/path/to/blur.comp", .params = {1, 0, 8}},
+                                {.shader = "/path/to/blur.comp", .params = {0, 1, 8}}}});
+```
+
+```lua
+base.rectangle({ width = 420, height = 220, shader_passes = {
+  { shader = "/path/to/blur.comp", params = { 1, 0, 8 } },
+  { shader = "/path/to/blur.comp", params = { 0, 1, 8 } },
+} })
+```
+
+Each backdrop read copies the whole surface, so it costs the same for every pass that reads it. A pass whose shader fails to load is skipped, not drawn as a plain rectangle.
+
 ## Animate it
 
 `#define VW_USE_TIME` gives the shader `vw_time()`, seconds since the app started drawing. While such a shader is on screen, its surface draws every frame; when it is gone, vw goes back to drawing only on change.

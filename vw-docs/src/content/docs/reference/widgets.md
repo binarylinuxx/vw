@@ -33,7 +33,7 @@ Every widget takes `place` and most take `input`:
 | `corner_radii` | `{top_left, top_right, bottom_right, bottom_left}`; unset ones use `radius` |
 | `color`, `color2`, `gradient` | fill, second stop, `none` / `horizontal` / `vertical` |
 | `border_width`, `border_color` | an inside border |
-| `shader`, `shader_params`, `shader_data` | a [custom shader](/guides/shaders/) |
+| `shader`, `shader_params`, `shader_data`, `shader_passes` | a [custom shader](/guides/shaders/) |
 
 A gradient runs from `color` to `color2`, left to right (`horizontal`) or top to bottom (`vertical`), clipped to the rounded corners:
 

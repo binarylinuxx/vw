@@ -336,17 +336,28 @@ Widget Ui::rectangle(const RectangleProps& props) {
   rectangle.gradient = static_cast<std::uint32_t>(props.gradient);
   rectangle.shader = props.shader;
   // A shader reading vw_time() keeps its surface drawing every frame.
-  if (!props.shader.empty() && rectangle.visible &&
-      (vws::peek_flags(props.shader) & vws::animated) != 0) {
-    request_animation_continuation();
-    scene_.shader_time = true;
-  }
-  for (float parameter : props.shader_params)
-    if (!std::isfinite(parameter)) throw std::invalid_argument("shader parameters must be finite");
+  const auto animate_if_timed = [&](const std::string& shader) {
+    if (!shader.empty() && rectangle.visible && (vws::peek_flags(shader) & vws::animated) != 0) {
+      request_animation_continuation();
+      scene_.shader_time = true;
+    }
+  };
+  const auto check_finite = [](std::span<const float> values, const char* what) {
+    for (float value : values)
+      if (!std::isfinite(value)) throw std::invalid_argument(std::string(what) + " must be finite");
+  };
+  animate_if_timed(props.shader);
+  check_finite(props.shader_params, "shader parameters");
   rectangle.shader_params = props.shader_params;
-  for (float value : props.shader_data)
-    if (!std::isfinite(value)) throw std::invalid_argument("shader data must be finite");
+  check_finite(props.shader_data, "shader data");
   rectangle.shader_data = props.shader_data;
+  for (const ShaderPass& pass : props.shader_passes) {
+    if (pass.shader.empty()) throw std::invalid_argument("a shader pass needs a shader");
+    animate_if_timed(pass.shader);
+    check_finite(pass.params, "shader pass parameters");
+    check_finite(pass.data, "shader pass data");
+  }
+  rectangle.shader_passes = props.shader_passes;
   const std::size_t begin = scene_.rectangles.size();
   scene_.add(rectangle);
   return push(begin, rectangle.width, rectangle.height, rectangle, props.input);
