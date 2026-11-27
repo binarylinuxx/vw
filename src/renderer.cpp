@@ -188,6 +188,35 @@ float shader_time() {
   return std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count();
 }
 
+// Named images a rectangle's shader passes can have (shader.glsl's vw_targets).
+constexpr std::uint32_t pass_images = 8;
+
+// A pass image's size: the rectangle grown by its padding on every side.
+std::array<std::uint32_t, 2> pass_extent(const Rectangle& rectangle) {
+  const float padding = std::ceil(rectangle.target_padding);
+  return {static_cast<std::uint32_t>(std::ceil(rectangle.width) + padding * 2),
+          static_cast<std::uint32_t>(std::ceil(rectangle.height) + padding * 2)};
+}
+
+// Whether a rectangle's passes use named images.
+bool uses_pass_images(const Rectangle& rectangle) {
+  return std::ranges::any_of(rectangle.shader_passes,
+                             [](const ShaderPass& pass) { return !pass.output.empty() || !pass.inputs.empty(); });
+}
+
+// Its image names, in order of first use: their indices in vw_targets.
+std::vector<std::string> pass_image_names(const Rectangle& rectangle) {
+  std::vector<std::string> names;
+  const auto note = [&](const std::string& name) {
+    if (!name.empty() && std::ranges::find(names, name) == names.end()) names.push_back(name);
+  };
+  for (const ShaderPass& pass : rectangle.shader_passes) {
+    for (const std::string& input : pass.inputs) note(input);
+    note(pass.output);
+  }
+  return names;
+}
+
 struct PushConstants {
   std::array<float, 4> bounds;
   std::array<float, 4> params;
@@ -370,10 +399,13 @@ struct Renderer::State {
     check(vkCreateCommandPool(device, &pool_info, nullptr, &command_pool),
           "vkCreateCommandPool");
 
-    const std::array<VkDescriptorSetLayoutBinding, 3> bindings{{
+    // 3 and 4: shader passes' named images, and the one a pass writes.
+    const std::array<VkDescriptorSetLayoutBinding, 5> bindings{{
         {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
         {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
-        {2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}}};
+        {2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+        {3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, pass_images, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+        {4, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}}};
     const VkDescriptorSetLayoutCreateInfo descriptor_info{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, nullptr, 0, bindings.size(),
         bindings.data()};
@@ -428,6 +460,8 @@ Frame Renderer::render(const Scene& scene) const {
     bool reads_backdrop = false;
     // shader_passes index, or -1 for the rectangle's own shader.
     std::ptrdiff_t pass = -1;
+    // The named image it writes (index), or -1 for the surface.
+    int output = -1;
   };
   std::vector<std::vector<Step>> rectangle_steps;
   // One time for every shader in the frame, so they move together.
@@ -439,22 +473,38 @@ Frame Renderer::render(const Scene& scene) const {
   const VkPipeline raster_pipeline = state_->raster_builtin(depth);
   rectangle_steps.reserve(scene.rectangles.size());
   bool needs_backdrop = false;
+  // The named images are shared by every rectangle in turn: as large as
+  // the largest needs.
+  std::array<std::uint32_t, 2> pass_size{1, 1};
+  std::vector<std::vector<std::string>> image_names(scene.rectangles.size());
   for (const Rectangle& rectangle : scene.rectangles) {
     auto& steps = rectangle_steps.emplace_back();
     if (!rectangle.visible) continue;
+    if (uses_pass_images(rectangle)) {
+      image_names[rectangle_steps.size() - 1] = pass_image_names(rectangle);
+      const auto extent = pass_extent(rectangle);
+      pass_size = {std::max(pass_size[0], extent[0]), std::max(pass_size[1], extent[1])};
+    }
     const auto shader = state_->rectangle_pipeline(rectangle.shader, depth);
     steps.push_back({shader.pipeline, (shader.flags & vws::reads_backdrop) != 0, -1});
     for (std::size_t pass = 0; pass < rectangle.shader_passes.size(); ++pass) {
       const auto loaded = state_->rectangle_pipeline(rectangle.shader_passes[pass].shader, depth);
       // A pass that failed to load is left out rather than filling again.
       if (!loaded.owned) continue;
+      const std::string& output = rectangle.shader_passes[pass].output;
+      const auto& names = image_names[rectangle_steps.size() - 1];
+      const int image = output.empty() ? -1 : static_cast<int>(std::ranges::find(names, output) - names.begin());
       steps.push_back({loaded.pipeline, (loaded.flags & vws::reads_backdrop) != 0,
-                       static_cast<std::ptrdiff_t>(pass)});
+                       static_cast<std::ptrdiff_t>(pass), image});
     }
     for (const Step& step : steps) needs_backdrop = needs_backdrop || step.reads_backdrop;
   }
   // The snapshot image exists only when some shader samples it; otherwise
   // binding 2 just aliases the target and is never read.
+  // The named images, then the one a pass writes (copied into its image).
+  std::array<VkImage, pass_images + 1> pass_image{};
+  std::array<VkDeviceMemory, pass_images + 1> pass_memory{};
+  std::array<VkImageView, pass_images + 1> pass_view{};
   VkBuffer raster_buffer = VK_NULL_HANDLE;
   VkDeviceMemory raster_memory = VK_NULL_HANDLE;
   VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
@@ -465,6 +515,11 @@ Frame Renderer::render(const Scene& scene) const {
       vkFreeCommandBuffers(state_->device, state_->command_pool, 1, &command);
     if (descriptor_pool != VK_NULL_HANDLE)
       vkDestroyDescriptorPool(state_->device, descriptor_pool, nullptr);
+    for (std::size_t index = 0; index < pass_image.size(); ++index) {
+      if (pass_view[index] != VK_NULL_HANDLE) vkDestroyImageView(state_->device, pass_view[index], nullptr);
+      if (pass_image[index] != VK_NULL_HANDLE) vkDestroyImage(state_->device, pass_image[index], nullptr);
+      if (pass_memory[index] != VK_NULL_HANDLE) vkFreeMemory(state_->device, pass_memory[index], nullptr);
+    }
     if (raster_buffer != VK_NULL_HANDLE) vkDestroyBuffer(state_->device, raster_buffer, nullptr);
     if (raster_memory != VK_NULL_HANDLE) vkFreeMemory(state_->device, raster_memory, nullptr);
     if (backdrop_view != VK_NULL_HANDLE) vkDestroyImageView(state_->device, backdrop_view, nullptr);
@@ -525,6 +580,25 @@ Frame Renderer::render(const Scene& scene) const {
       check(vkCreateImageView(state_->device, &view, nullptr, &backdrop_view), "vkCreateImageView(backdrop)");
     }
 
+    // Float images for shader passes; one pixel each when no pass has any,
+    // so bindings 3 and 4 always hold something.
+    for (std::size_t index = 0; index < pass_image.size(); ++index) {
+      const VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, nullptr, 0, VK_IMAGE_TYPE_2D,
+          VK_FORMAT_R32G32B32A32_SFLOAT, {pass_size[0], pass_size[1], 1}, 1, 1, VK_SAMPLE_COUNT_1_BIT,
+          VK_IMAGE_TILING_OPTIMAL,
+          VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+          VK_SHARING_MODE_EXCLUSIVE, 0, nullptr, VK_IMAGE_LAYOUT_UNDEFINED};
+      check(vkCreateImage(state_->device, &info, nullptr, &pass_image[index]), "vkCreateImage(pass)");
+      vkGetImageMemoryRequirements(state_->device, pass_image[index], &requirements);
+      const VkMemoryAllocateInfo allocation{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr, requirements.size,
+          memory_type(state_->physical_device, requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)};
+      check(vkAllocateMemory(state_->device, &allocation, nullptr, &pass_memory[index]), "vkAllocateMemory(pass)");
+      check(vkBindImageMemory(state_->device, pass_image[index], pass_memory[index], 0), "vkBindImageMemory(pass)");
+      const VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, nullptr, 0, pass_image[index],
+          VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT, {}, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+      check(vkCreateImageView(state_->device, &view, nullptr, &pass_view[index]), "vkCreateImageView(pass)");
+    }
+
     // Where each raster lands, in whole pixels, and the pixels it shows there:
     // text between pixels uses its copy rasterized at that offset.
     std::vector<std::array<float, 2>> raster_positions(scene.rasters.size());
@@ -583,8 +657,24 @@ Frame Renderer::render(const Scene& scene) const {
       const Rectangle& rectangle = scene.rectangles[index];
       if (!rectangle.shader.empty() && !rectangle.shader_data.empty())
         data_offsets[index] = append_data(rectangle.shader_data);
-      for (const ShaderPass& pass : rectangle.shader_passes)
-        pass_offsets[index].push_back(pass.data.empty() ? 0 : append_data(pass.data));
+      const auto& names = image_names[index];
+      for (const ShaderPass& pass : rectangle.shader_passes) {
+        if (names.empty()) {
+          pass_offsets[index].push_back(pass.data.empty() ? 0 : append_data(pass.data));
+          continue;
+        }
+        // After its data: padding, image size, input count, input images
+        // (shader.glsl's vw_pass_word).
+        const auto extent = pass_extent(rectangle);
+        std::vector<float> words = pass.data;
+        words.push_back(std::ceil(rectangle.target_padding));
+        words.push_back(static_cast<float>(extent[0]));
+        words.push_back(static_cast<float>(extent[1]));
+        words.push_back(static_cast<float>(pass.inputs.size()));
+        for (const std::string& input : pass.inputs)
+          words.push_back(static_cast<float>(std::ranges::find(names, input) - names.begin()));
+        pass_offsets[index].push_back(append_data(words));
+      }
     }
     // Image masks follow them; the raster shader finds its own through the
     // spare fourth components of its effect and colorize constants.
@@ -615,7 +705,7 @@ Frame Renderer::render(const Scene& scene) const {
     vkUnmapMemory(state_->device, raster_memory);
 
     const std::array<VkDescriptorPoolSize, 2> pool_sizes{{
-        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}}};
+        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 + pass_images + 1}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}}};
     const VkDescriptorPoolCreateInfo pool_info{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
                                                 nullptr, 0, 1, pool_sizes.size(), pool_sizes.data()};
     check(vkCreateDescriptorPool(state_->device, &pool_info, nullptr, &descriptor_pool),
@@ -631,13 +721,21 @@ Frame Renderer::render(const Scene& scene) const {
     const VkDescriptorBufferInfo descriptor_buffer{raster_buffer, 0, raster_bytes};
     const VkDescriptorImageInfo descriptor_backdrop{VK_NULL_HANDLE,
         needs_backdrop ? backdrop_view : image_view, VK_IMAGE_LAYOUT_GENERAL};
-    const std::array<VkWriteDescriptorSet, 3> writes{{
+    std::array<VkDescriptorImageInfo, pass_images> descriptor_targets{};
+    for (std::size_t index = 0; index < pass_images; ++index)
+      descriptor_targets[index] = {VK_NULL_HANDLE, pass_view[index], VK_IMAGE_LAYOUT_GENERAL};
+    const VkDescriptorImageInfo descriptor_output{VK_NULL_HANDLE, pass_view[pass_images], VK_IMAGE_LAYOUT_GENERAL};
+    const std::array<VkWriteDescriptorSet, 5> writes{{
         {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptor, 0, 0, 1,
          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &descriptor_image, nullptr, nullptr},
         {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptor, 1, 0, 1,
           VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, &descriptor_buffer, nullptr},
         {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptor, 2, 0, 1,
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &descriptor_backdrop, nullptr, nullptr}}};
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &descriptor_backdrop, nullptr, nullptr},
+        {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptor, 3, 0, pass_images,
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, descriptor_targets.data(), nullptr, nullptr},
+        {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptor, 4, 0, 1,
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &descriptor_output, nullptr, nullptr}}};
     vkUpdateDescriptorSets(state_->device, writes.size(), writes.data(), 0, nullptr);
 
     const VkCommandBufferAllocateInfo command_allocation{
@@ -666,6 +764,61 @@ Frame Renderer::render(const Scene& scene) const {
     vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT,
                          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1,
                          &barrier);
+    // The pass images start cleared, in the general layout shaders use.
+    {
+      std::array<VkImageMemoryBarrier, pass_images + 1> to_clear{};
+      for (std::size_t index = 0; index < to_clear.size(); ++index) {
+        to_clear[index] = barrier;
+        to_clear[index].image = pass_image[index];
+        to_clear[index].srcAccessMask = 0;
+        to_clear[index].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        to_clear[index].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        to_clear[index].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      }
+      vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr,
+                           0, nullptr, to_clear.size(), to_clear.data());
+      for (VkImage pass : pass_image)
+        vkCmdClearColorImage(command, pass, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear, 1, &range);
+      for (auto& entry : to_clear) {
+        entry.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        entry.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        entry.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        entry.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+      }
+      vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                           0, nullptr, to_clear.size(), to_clear.data());
+    }
+
+    // Copies what a pass wrote into its named image.
+    const auto store_pass = [&](int output, std::array<std::uint32_t, 2> extent) {
+      std::array<VkImageMemoryBarrier, 2> copies{{barrier, barrier}};
+      copies[0].image = pass_image[pass_images];
+      copies[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+      copies[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+      copies[0].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+      copies[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      copies[1].image = pass_image[static_cast<std::size_t>(output)];
+      copies[1].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+      copies[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+      copies[1].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+      copies[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr,
+                           0, nullptr, copies.size(), copies.data());
+      const VkImageCopy region{{VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0},
+          {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {extent[0], extent[1], 1}};
+      vkCmdCopyImage(command, copies[0].image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, copies[1].image,
+                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+      copies[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+      copies[0].dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+      copies[1].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+      copies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+      for (auto& copy : copies) {
+        copy.oldLayout = copy.newLayout;
+        copy.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+      }
+      vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                           0, nullptr, copies.size(), copies.data());
+    };
 
     vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_COMPUTE, state_->pipeline_layout, 0,
                              1, &descriptor, 0, nullptr);
@@ -773,6 +926,13 @@ Frame Renderer::render(const Scene& scene) const {
                                  shader_params};
         vkCmdPushConstants(command, state_->pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                            sizeof(push), &push);
+        if (step.output >= 0) {
+          // Into a named image: every pixel of it, then copied in place.
+          const auto extent = pass_extent(rectangle);
+          vkCmdDispatch(command, (extent[0] + 7) / 8, (extent[1] + 7) / 8, 1);
+          store_pass(step.output, extent);
+          continue;
+        }
         vkCmdDispatch(command,
                       (static_cast<std::uint32_t>(std::ceil(rectangle.width)) + 7) / 8,
                       (static_cast<std::uint32_t>(std::ceil(rectangle.height)) + 7) / 8, 1);

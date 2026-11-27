@@ -357,7 +357,23 @@ Widget Ui::rectangle(const RectangleProps& props) {
     check_finite(pass.params, "shader pass parameters");
     check_finite(pass.data, "shader pass data");
   }
+  if (!std::isfinite(props.target_padding) || props.target_padding < 0.0F || props.target_padding > 1024.0F)
+    throw std::invalid_argument("target_padding must be 0..1024");
+  // A pass reads only images earlier passes wrote; eight names at most.
+  {
+    std::vector<std::string> written;
+    for (const ShaderPass& pass : props.shader_passes) {
+      for (const std::string& input : pass.inputs)
+        if (std::ranges::find(written, input) == written.end())
+          throw std::invalid_argument("shader pass input '" + input + "' is not written by an earlier pass");
+      if (!pass.output.empty() && std::ranges::find(written, pass.output) == written.end()) {
+        if (written.size() == 8) throw std::invalid_argument("a rectangle's passes have at most 8 named images");
+        written.push_back(pass.output);
+      }
+    }
+  }
   rectangle.shader_passes = props.shader_passes;
+  rectangle.target_padding = props.target_padding;
   const std::size_t begin = scene_.rectangles.size();
   scene_.add(rectangle);
   return push(begin, rectangle.width, rectangle.height, rectangle, props.input);

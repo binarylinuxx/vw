@@ -211,9 +211,14 @@ std::string validate(const Interface& interface, std::uint16_t& flags) {
     if (binding == 0) target = true;
     else if (binding == 1) flags |= reads_data;
     else if (binding == 2) flags |= reads_backdrop;
-    else return std::format("binding {} does not exist; vw provides 0 (target), 1 (data) and 2 (backdrop)", binding);
+    else if (binding == 3) flags |= uses_targets | reads_data;
+    // A pass writing a named image (binding 4) draws there, not on the surface.
+    else if (binding == 4) target = true, flags |= uses_targets | reads_data;
+    else return std::format("binding {} does not exist; vw provides 0 (target), 1 (data), 2 (backdrop), "
+                            "3 and 4 (pass images)", binding);
   }
-  if (!target) return "binding 0 (the target image) is never declared, so the shader cannot draw";
+  if (!target)
+    return "neither binding 0 (the target image) nor 4 (a pass's named image) is declared, so the shader cannot draw";
   return {};
 }
 

@@ -159,6 +159,10 @@ struct RectangleProps {
   // empty). Each pass has its own shader, params and data; one that samples
   // the backdrop reads what the passes before it drew.
   std::vector<ShaderPass> shader_passes;
+  // How far passes' named images (ShaderPass::output) reach past the
+  // rectangle on every side, px: room for what is computed around it, such
+  // as a distance field spreading outward.
+  float target_padding = 0.0F;
   Placement place;
   Input input;
 };

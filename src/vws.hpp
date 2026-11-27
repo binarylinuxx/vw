@@ -38,6 +38,9 @@ enum Flag : std::uint16_t {
   // Reads vw_time() (`#define VW_USE_TIME`): the surface redraws every frame
   // while the shader is on screen.
   animated = 1U << 2U,
+  // Declares bindings 3 and 4, the named images of shader passes
+  // (`#define VW_USE_TARGETS`).
+  uses_targets = 1U << 3U,
 };
 
 struct Shader {

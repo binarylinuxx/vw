@@ -5,6 +5,7 @@
 //   #define VW_USE_BACKDROP   // only if you sample what was drawn before
 //   #define VW_USE_DATA       // only if you read shader_data
 //   #define VW_USE_TIME       // only if you read vw_time(): redraws every frame
+//   #define VW_USE_TARGETS    // a shader pass with named images (output, inputs)
 //   #include <vw/shader.glsl>
 //
 //   void main() {
@@ -20,6 +21,10 @@
 
 #ifndef VW_SHADER_GLSL
 #define VW_SHADER_GLSL
+// Pass images find their geometry and inputs after the pass's data.
+#if defined(VW_USE_TARGETS) && !defined(VW_USE_DATA)
+#define VW_USE_DATA
+#endif
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -52,6 +57,73 @@ uint vw_data_length() { return uint(vw.clip_params.z); }
 layout(rgba8, set = 0, binding = 2) readonly uniform image2D vw_backdrop_image;
 vec4 vw_backdrop(ivec2 pixel) {
   return imageLoad(vw_backdrop_image, clamp(pixel, ivec2(0), imageSize(vw_backdrop_image) - 1));
+}
+#endif
+
+#ifdef VW_USE_TARGETS
+// Shader passes with named images (ShaderPass::output and ::inputs).
+// Binding 3: the rectangle's named images, float RGBA, each the rectangle
+// grown by target_padding on every side. Binding 4: what a pass with an
+// output writes; vw copies it into the output's image after the pass, so a
+// pass may read the image it replaces.
+layout(rgba32f, set = 0, binding = 3) readonly uniform image2D vw_targets[8];
+layout(rgba32f, set = 0, binding = 4) writeonly uniform image2D vw_pass_output;
+
+// After the pass's own data: padding, image width, height, input count,
+// then each input's image.
+float vw_pass_word(uint index) {
+  return uintBitsToFloat(vw_data_buffer.words[uint(vw.clip_params.y) + uint(vw.clip_params.z) + index]);
+}
+float vw_target_padding() { return vw_pass_word(0u); }
+vec2 vw_target_size() { return vec2(vw_pass_word(1u), vw_pass_word(2u)); }
+int vw_input_count() { return int(vw_pass_word(3u)); }
+
+// Where the images' pixel (0, 0) is on the surface.
+vec2 vw_target_origin() { return floor(vw.bounds.xy) - vw_target_padding(); }
+// A surface position in image pixels, and back.
+vec2 vw_target_position(vec2 surface) { return surface - vw_target_origin(); }
+vec2 vw_surface_position(vec2 image) { return image + vw_target_origin(); }
+
+// A pass with an output runs once for each pixel of its image: the pixel,
+// false past the image.
+bool vw_pass_begin(out ivec2 pixel) {
+  pixel = ivec2(gl_GlobalInvocationID.xy);
+  return all(lessThan(pixel, ivec2(vw_target_size())));
+}
+// A pass pixel's centre relative to the rectangle's top-left, as vw_begin's
+// `local`: negative or past vw_size() in the padding.
+vec2 vw_pass_local(ivec2 pixel) { return vec2(pixel) + 0.5 - vw_target_padding(); }
+// Writes the pass's output at an image pixel.
+void vw_store(ivec2 pixel, vec4 value) { imageStore(vw_pass_output, pixel, value); }
+
+// Image arrays take constant indices everywhere; a switch keeps it so.
+vec4 vw_image_load(int image, ivec2 pixel) {
+  switch (image) {
+    case 0: return imageLoad(vw_targets[0], pixel);
+    case 1: return imageLoad(vw_targets[1], pixel);
+    case 2: return imageLoad(vw_targets[2], pixel);
+    case 3: return imageLoad(vw_targets[3], pixel);
+    case 4: return imageLoad(vw_targets[4], pixel);
+    case 5: return imageLoad(vw_targets[5], pixel);
+    case 6: return imageLoad(vw_targets[6], pixel);
+    default: return imageLoad(vw_targets[7], pixel);
+  }
+}
+// Input `which` (its place in ShaderPass::inputs) at an image pixel,
+// clamped to the image.
+vec4 vw_input_load(int which, ivec2 pixel) {
+  int image = int(vw_pass_word(4u + uint(which)));
+  return vw_image_load(image, clamp(pixel, ivec2(0), ivec2(vw_target_size()) - 1));
+}
+// The same between pixels, bilinear, at a position in image pixels (a
+// pixel's centre is at +0.5).
+vec4 vw_input_sample(int which, vec2 position) {
+  vec2 p = position - 0.5;
+  ivec2 i = ivec2(floor(p));
+  vec2 f = fract(p);
+  vec4 top = mix(vw_input_load(which, i), vw_input_load(which, i + ivec2(1, 0)), f.x);
+  vec4 bottom = mix(vw_input_load(which, i + ivec2(0, 1)), vw_input_load(which, i + ivec2(1, 1)), f.x);
+  return mix(top, bottom, f.y);
 }
 #endif
 

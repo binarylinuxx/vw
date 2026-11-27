@@ -64,6 +64,7 @@ std::string describe_flags(std::uint16_t flags) {
   std::string result;
   if ((flags & vws::reads_data) != 0) result += "data ";
   if ((flags & vws::reads_backdrop) != 0) result += "backdrop ";
+  if ((flags & vws::uses_targets) != 0) result += "pass-images ";
   if ((flags & vws::animated) != 0) result += "time ";
   if (result.empty()) return "none";
   result.pop_back();  // the trailing space

@@ -124,6 +124,13 @@ struct ShaderPass {
   std::string shader;
   std::array<float, 4> params{0.0F, 0.0F, 0.0F, 0.0F};
   std::vector<float> data;
+  // Where it draws. Empty: the surface, like the rectangle's own shader.
+  // A name: a float (rgba32f) image of its own, the rectangle grown by
+  // target_padding on every side, that later passes read by that name. A
+  // pass may write the image it reads: it sees the old one throughout.
+  std::string output;
+  // The named images it reads, in order: vw_input_load(0, ...), (1, ...).
+  std::vector<std::string> inputs;
 
   bool operator==(const ShaderPass&) const = default;
 };
@@ -160,6 +167,8 @@ struct Rectangle {
   std::array<float, 4> shader_params{0.0F, 0.0F, 0.0F, 0.0F};
   std::vector<float> shader_data;
   std::vector<ShaderPass> shader_passes;
+  // How far the passes' named images reach past the rectangle, px.
+  float target_padding = 0.0F;
 
   bool operator==(const Rectangle&) const = default;
 };

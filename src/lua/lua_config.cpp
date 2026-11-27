@@ -489,9 +489,24 @@ int add_rectangle(lua_State* lua) {
       pass.shader = string_field(lua, entry, "shader");
       shader_params_field(lua, entry, "params", pass.params);
       shader_data_field(lua, entry, "data", pass.data);
+      pass.output = string_field(lua, entry, "output");
+      lua_getfield(lua, entry, "inputs");
+      if (!lua_isnil(lua, -1)) {
+        luaL_checktype(lua, -1, LUA_TTABLE);
+        const lua_Integer inputs = luaL_len(lua, -1);
+        for (lua_Integer input = 1; input <= inputs; ++input) {
+          lua_geti(lua, -1, input);
+          pass.inputs.emplace_back(luaL_checkstring(lua, -1));
+          lua_pop(lua, 1);
+        }
+      }
+      lua_pop(lua, 1);
       lua_pop(lua, 1);
     }
   }
+  lua_pop(lua, 1);
+  lua_getfield(lua, 1, "target_padding");
+  if (!lua_isnil(lua, -1)) props.target_padding = static_cast<float>(luaL_checknumber(lua, -1));
   lua_pop(lua, 1);
   props.place = placement(lua, 1);
   props.input = input(lua, 1);
